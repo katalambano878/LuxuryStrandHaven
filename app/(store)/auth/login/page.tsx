@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
+import { persistAccessCookie } from '@/lib/auth-session';
 import { useRecaptcha } from '@/hooks/useRecaptcha';
 
 export default function LoginPage() {
@@ -61,8 +62,11 @@ export default function LoginPage() {
       }
 
       if (data.session) {
+        persistAccessCookie(data.session.access_token, data.session.expires_in);
         router.push('/account');
-        router.refresh(); // Refresh to update auth state in other components
+        router.refresh();
+      } else {
+        setAuthError('Sign in did not start a session. Please try again.');
       }
     } catch (error: any) {
       console.error('Login error:', error);

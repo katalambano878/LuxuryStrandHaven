@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabase';
+import { persistAccessCookie } from '@/lib/auth-session';
 import { useRecaptcha } from '@/hooks/useRecaptcha';
 
 export default function AdminLoginPage() {
@@ -37,8 +38,11 @@ export default function AdminLoginPage() {
       if (error) throw error;
 
       if (data.session) {
+        persistAccessCookie(data.session.access_token, data.session.expires_in);
         router.push('/admin');
         router.refresh();
+      } else {
+        setError('Sign in did not start a session. Please try again.');
       }
     } catch (err: any) {
       setError(err.message || 'Login failed');

@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
+import { clearAccessCookie, persistAccessCookie } from '@/lib/auth-session';
 
 export default function AdminLayout({
   children,
@@ -49,14 +50,14 @@ export default function AdminLayout({
 
       if (profileError || !profile) {
         console.error('Failed to fetch user profile');
-        document.cookie = 'admin_session=; path=/; max-age=0';
+        clearAccessCookie();
         router.push('/admin/login');
         return;
       }
 
       if (profile.role !== 'admin' && profile.role !== 'staff') {
         console.warn('User does not have admin/staff role');
-        document.cookie = 'admin_session=; path=/; max-age=0';
+        clearAccessCookie();
         await supabase.auth.signOut();
         router.push('/admin/login?error=unauthorized');
         return;
@@ -66,6 +67,7 @@ export default function AdminLayout({
       setUserRole(profile.role);
       setIsAuthenticated(true);
       setIsLoading(false);
+      persistAccessCookie(session.access_token, session.expires_in);
       document.cookie = 'admin_session=1; path=/; max-age=86400; SameSite=Lax';
     }
 
@@ -131,7 +133,7 @@ export default function AdminLayout({
   }, []);
 
   const handleLogout = async () => {
-    document.cookie = 'admin_session=; path=/; max-age=0';
+    clearAccessCookie();
     await supabase.auth.signOut();
     router.push('/admin/login');
   };
