@@ -526,6 +526,8 @@ CREATE TABLE IF NOT EXISTS public.academia_courses (
   icon text DEFAULT '📚',
   price numeric DEFAULT 0,
   youtube_url text,
+  telegram_url text,
+  thumbnail_url text,
   sort_order integer DEFAULT 0,
   status text DEFAULT 'active' CHECK (status IN ('active','draft')),
   created_at timestamptz DEFAULT now(),

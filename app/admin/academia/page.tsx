@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
+import ImageUpload from '@/components/admin/ImageUpload';
 
 const inputClass = 'w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-gray-600 focus:border-gray-600';
 
@@ -17,6 +18,8 @@ export default function AdminAcademiaPage() {
     icon: '📚',
     price: '',
     youtube_url: '',
+    telegram_url: '',
+    thumbnail_url: '',
     status: 'active',
   });
 
@@ -43,7 +46,7 @@ export default function AdminAcademiaPage() {
 
   const openAdd = () => {
     setEditingId(null);
-    setForm({ title: '', description: '', icon: '📚', price: '', youtube_url: '', status: 'active' });
+    setForm({ title: '', description: '', icon: '📚', price: '', youtube_url: '', telegram_url: '', thumbnail_url: '', status: 'active' });
     setShowModal(true);
   };
 
@@ -55,6 +58,8 @@ export default function AdminAcademiaPage() {
       icon: c.icon ?? '📚',
       price: c.price != null ? String(c.price) : '',
       youtube_url: c.youtube_url ?? '',
+      telegram_url: c.telegram_url ?? '',
+      thumbnail_url: c.thumbnail_url ?? '',
       status: c.status ?? 'active',
     });
     setShowModal(true);
@@ -74,6 +79,8 @@ export default function AdminAcademiaPage() {
         icon: form.icon.trim() || '📚',
         price: form.price ? parseFloat(form.price) : 0,
         youtube_url: form.youtube_url.trim() || null,
+        telegram_url: form.telegram_url.trim() || null,
+        thumbnail_url: form.thumbnail_url.trim() || null,
         status: form.status,
       };
       if (editingId) {
@@ -115,7 +122,7 @@ export default function AdminAcademiaPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold text-gray-900">Academia</h1>
-          <p className="text-gray-600 mt-1">Manage online courses — prices and YouTube links</p>
+          <p className="text-gray-600 mt-1">Manage online courses — price, thumbnail, YouTube and Telegram links</p>
         </div>
         <button
           onClick={openAdd}
@@ -150,7 +157,7 @@ export default function AdminAcademiaPage() {
               <tr>
                 <th className="text-left py-3 px-4 text-sm font-semibold text-gray-700">Course</th>
                 <th className="text-left py-3 px-4 text-sm font-semibold text-gray-700">Price</th>
-                <th className="text-left py-3 px-4 text-sm font-semibold text-gray-700">YouTube</th>
+                <th className="text-left py-3 px-4 text-sm font-semibold text-gray-700">Links</th>
                 <th className="text-left py-3 px-4 text-sm font-semibold text-gray-700">Status</th>
                 <th className="text-left py-3 px-4 text-sm font-semibold text-gray-700">Actions</th>
               </tr>
@@ -159,18 +166,30 @@ export default function AdminAcademiaPage() {
               {courses.map((c) => (
                 <tr key={c.id} className="border-b border-gray-100 hover:bg-gray-50">
                   <td className="py-3 px-4">
-                    <span className="mr-2">{c.icon || '📚'}</span>
-                    <span className="font-medium text-gray-900">{c.title}</span>
+                    <div className="flex items-center gap-3">
+                      {c.thumbnail_url ? (
+                        <img src={c.thumbnail_url} alt="" className="w-12 h-12 rounded-lg object-cover bg-gray-100" />
+                      ) : (
+                        <span className="w-12 h-12 rounded-lg bg-gray-100 flex items-center justify-center text-xl">{c.icon || '📚'}</span>
+                      )}
+                      <span className="font-medium text-gray-900">{c.title}</span>
+                    </div>
                   </td>
                   <td className="py-3 px-4 text-gray-700">{formatPrice(c.price)}</td>
                   <td className="py-3 px-4">
-                    {c.youtube_url ? (
-                      <a href={c.youtube_url} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline text-sm">
-                        Watch
-                      </a>
-                    ) : (
-                      <span className="text-gray-400">—</span>
-                    )}
+                    <div className="flex flex-col gap-1">
+                      {c.youtube_url ? (
+                        <a href={c.youtube_url} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline text-sm">
+                          YouTube
+                        </a>
+                      ) : null}
+                      {c.telegram_url ? (
+                        <a href={c.telegram_url} target="_blank" rel="noopener noreferrer" className="text-sky-600 hover:underline text-sm">
+                          Telegram
+                        </a>
+                      ) : null}
+                      {!c.youtube_url && !c.telegram_url ? <span className="text-gray-400">—</span> : null}
+                    </div>
                   </td>
                   <td className="py-3 px-4">
                     <span className={`px-2 py-1 rounded text-xs font-medium ${c.status === 'active' ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-600'}`}>
@@ -250,6 +269,20 @@ export default function AdminAcademiaPage() {
                 </div>
               </div>
               <div>
+                <ImageUpload
+                  label="Thumbnail"
+                  description="Cover image shown on the Academia page. Square or portrait works best."
+                  value={form.thumbnail_url}
+                  onChange={(url) => {
+                    const path = url.match(/\/storage\/v1\/object\/public\/.+$/)?.[0] || url;
+                    setForm({ ...form, thumbnail_url: path });
+                  }}
+                  bucket="site-assets"
+                  folder="academia"
+                  previewHeight={160}
+                />
+              </div>
+              <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-1">YouTube URL</label>
                 <input
                   type="url"
@@ -258,7 +291,18 @@ export default function AdminAcademiaPage() {
                   className={inputClass}
                   placeholder="https://youtube.com/..."
                 />
-                <p className="text-xs text-gray-500 mt-1">Button on the store will open this link.</p>
+                <p className="text-xs text-gray-500 mt-1">The store button opens this link.</p>
+              </div>
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">Telegram URL</label>
+                <input
+                  type="url"
+                  value={form.telegram_url}
+                  onChange={(e) => setForm({ ...form, telegram_url: e.target.value })}
+                  className={inputClass}
+                  placeholder="https://t.me/..."
+                />
+                <p className="text-xs text-gray-500 mt-1">Group, channel, or chat link. Optional.</p>
               </div>
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-1">Status</label>

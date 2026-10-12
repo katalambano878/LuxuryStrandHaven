@@ -7,7 +7,7 @@ import { motion } from 'framer-motion';
 import { supabase } from '@/lib/supabase';
 
 export default function AcademiaPage() {
-  const [courses, setCourses] = useState<{ id: string; title: string; description: string | null; icon: string | null; price: number; youtube_url: string | null }[]>([]);
+  const [courses, setCourses] = useState<{ id: string; title: string; description: string | null; icon: string | null; price: number; youtube_url: string | null; telegram_url: string | null; thumbnail_url: string | null }[]>([]);
   const [coursesLoading, setCoursesLoading] = useState(true);
   const [email, setEmail] = useState('');
   const [submitted, setSubmitted] = useState(false);
@@ -17,7 +17,7 @@ export default function AcademiaPage() {
       try {
         const { data, error } = await supabase
           .from('academia_courses')
-          .select('id, title, description, icon, price, youtube_url')
+          .select('id, title, description, icon, price, youtube_url, telegram_url, thumbnail_url')
           .eq('status', 'active')
           .order('sort_order', { ascending: true })
           .order('created_at', { ascending: false });
@@ -115,8 +115,14 @@ export default function AcademiaPage() {
             courses.map((course) => (
               <div
                 key={course.id}
-                className="text-left p-6 rounded-2xl border border-white/10 bg-white/5 backdrop-blur-sm hover:border-amber-500/40 hover:bg-white/8 transition-all group"
+                className="text-left rounded-2xl border border-white/10 bg-white/5 backdrop-blur-sm hover:border-amber-500/40 transition-all group overflow-hidden"
               >
+                {course.thumbnail_url ? (
+                  <div className="aspect-[16/10] bg-white/5">
+                    <img src={course.thumbnail_url} alt="" className="w-full h-full object-cover" />
+                  </div>
+                ) : null}
+                <div className="p-6">
                 <span className="text-3xl mb-3 block">{course.icon || '📚'}</span>
                 <h3 className="font-semibold text-white mb-2 group-hover:text-amber-400 transition-colors">
                   {course.title}
@@ -128,19 +134,34 @@ export default function AcademiaPage() {
                   <span className="text-amber-400 font-bold">
                     {course.price != null && course.price > 0 ? `GH₵ ${Number(course.price).toFixed(2)}` : 'Free'}
                   </span>
-                  {course.youtube_url ? (
-                    <a
-                      href={course.youtube_url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center gap-2 bg-amber-500 hover:bg-amber-400 text-black font-bold px-4 py-2 rounded-full text-sm transition-all"
-                    >
-                      <i className="ri-youtube-line text-lg" />
-                      Watch on YouTube
-                    </a>
-                  ) : (
-                    <span className="text-white/40 text-sm">Link coming soon</span>
-                  )}
+                  <div className="flex flex-wrap gap-2">
+                    {course.youtube_url ? (
+                      <a
+                        href={course.youtube_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-2 bg-amber-500 hover:bg-amber-400 text-black font-bold px-4 py-2 rounded-full text-sm transition-all"
+                      >
+                        <i className="ri-youtube-line text-lg" />
+                        YouTube
+                      </a>
+                    ) : null}
+                    {course.telegram_url ? (
+                      <a
+                        href={course.telegram_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-2 bg-sky-500 hover:bg-sky-400 text-white font-bold px-4 py-2 rounded-full text-sm transition-all"
+                      >
+                        <i className="ri-telegram-line text-lg" />
+                        Telegram
+                      </a>
+                    ) : null}
+                    {!course.youtube_url && !course.telegram_url ? (
+                      <span className="text-white/40 text-sm">Link coming soon</span>
+                    ) : null}
+                  </div>
+                </div>
                 </div>
               </div>
             ))

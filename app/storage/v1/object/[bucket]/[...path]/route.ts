@@ -5,6 +5,19 @@ import { isPlainPostgres } from "@/lib/db/mode";
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
+function cors(): HeadersInit {
+  return {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Headers":
+      "authorization, apikey, content-type, x-upsert, cache-control, x-client-info",
+    "Access-Control-Allow-Methods": "POST,DELETE,OPTIONS",
+  };
+}
+
+export async function OPTIONS() {
+  return new NextResponse(null, { status: 204, headers: cors() });
+}
+
 /**
  * Supabase Storage upload:
  *   POST /storage/v1/object/{bucket}/{path}
@@ -32,16 +45,19 @@ export async function POST(
   });
 
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 400 });
+    return NextResponse.json({ error: error.message }, { status: 400, headers: cors() });
   }
 
   const { data: pub } = storage.from(bucket).getPublicUrl(objectPath);
-  return NextResponse.json({
-    Key: `${bucket}/${objectPath}`,
-    Id: data?.path,
-    ...data,
-    publicUrl: pub.publicUrl,
-  });
+  return NextResponse.json(
+    {
+      Key: `${bucket}/${objectPath}`,
+      Id: data?.path,
+      ...data,
+      publicUrl: pub.publicUrl,
+    },
+    { headers: cors() }
+  );
 }
 
 export async function DELETE(
