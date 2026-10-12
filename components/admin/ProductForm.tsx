@@ -5,6 +5,7 @@ import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useRouter } from 'next/navigation';
 import { money } from '@/lib/format-money';
+import { posterUrl } from '@/lib/media-url';
 
 interface ProductFormProps {
     initialData?: any;
@@ -1193,6 +1194,7 @@ export default function ProductForm({ initialData, isEditMode = false }: Product
                                                 {isVid ? (
                                                     <video
                                                         src={img.url}
+                                                        poster={posterUrl(img.url)}
                                                         className="w-full h-full object-cover"
                                                         muted
                                                         playsInline

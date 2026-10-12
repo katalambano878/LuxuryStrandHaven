@@ -1,18 +1,8 @@
 'use client';
 
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useCallback } from 'react';
 import Image from 'next/image';
-
-const VIDEO_EXTENSIONS = ['.mov', '.mp4', '.webm', '.avi', '.m4v'];
-
-function isVideoUrl(url: string): boolean {
-  try {
-    const pathname = new URL(url).pathname.toLowerCase();
-    return VIDEO_EXTENSIONS.some(ext => pathname.endsWith(ext));
-  } catch {
-    return VIDEO_EXTENSIONS.some(ext => url.toLowerCase().endsWith(ext));
-  }
-}
+import { isVideoUrl, posterUrl } from '@/lib/media-url';
 
 interface LazyImageProps {
   src: string;
@@ -37,10 +27,6 @@ export default function LazyImage({
 }: LazyImageProps) {
   const [isLoaded, setIsLoaded] = useState(false);
   const [hasError, setHasError] = useState(false);
-  const [isVisible, setIsVisible] = useState(false);
-  const [autoplayFailed, setAutoplayFailed] = useState(false);
-  const containerRef = useRef<HTMLDivElement>(null);
-  const videoRef = useRef<HTMLVideoElement>(null);
 
   const handleLoad = useCallback(() => {
     setIsLoaded(true);
@@ -55,100 +41,27 @@ export default function LazyImage({
 
   const isVideo = src ? isVideoUrl(src) : false;
 
-  useEffect(() => {
-    if (!isVideo || !containerRef.current) return;
-
-    const observer = new IntersectionObserver(
-      ([entry]) => {
-        if (entry.isIntersecting) {
-          setIsVisible(true);
-          observer.disconnect();
-        }
-      },
-      { rootMargin: '200px' }
-    );
-
-    observer.observe(containerRef.current);
-    return () => observer.disconnect();
-  }, [isVideo]);
-
-  useEffect(() => {
-    const video = videoRef.current;
-    if (!video || !isVisible) return;
-
-    const tryPlay = () => {
-      const p = video.play();
-      if (p !== undefined) {
-        p.catch(() => setAutoplayFailed(true));
-      }
-    };
-
-    if (video.readyState >= 2) {
-      tryPlay();
-    } else {
-      video.addEventListener('canplay', tryPlay, { once: true });
-      return () => video.removeEventListener('canplay', tryPlay);
-    }
-  }, [isVisible, src]);
-
-  const handleTapPlay = useCallback(() => {
-    const video = videoRef.current;
-    if (!video) return;
-    video.play().then(() => setAutoplayFailed(false)).catch(() => {});
-  }, []);
-
-  if (!src || (hasError && !isVideo)) {
+  if (!src || hasError) {
     return (
-      <div className={`relative overflow-hidden bg-gray-200 flex items-center justify-center ${className}`} style={{ width, height }}>
-        <span className="text-gray-400 text-xs">No Image</span>
-      </div>
-    );
-  }
-
-  if (hasError && isVideo) {
-    return (
-      <div className={`relative overflow-hidden bg-gray-100 flex flex-col items-center justify-center ${className}`} style={{ width, height }}>
-        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" className="text-gray-400 mb-1">
-          <path d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14v-4zM3 8a2 2 0 012-2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V8z" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-        </svg>
-        <span className="text-gray-400 text-[10px]">Video</span>
+      <div className={`relative overflow-hidden bg-gray-100 flex items-center justify-center ${className}`} style={{ width, height }}>
+        <span className="text-gray-400 text-xs">{isVideo ? 'Video' : 'No Image'}</span>
       </div>
     );
   }
 
   if (isVideo) {
     return (
-      <div ref={containerRef} className={`relative overflow-hidden ${className}`} style={{ width, height }}>
+      <div className={`relative overflow-hidden ${className}`} style={{ width, height }}>
         {!isLoaded && (
-          <div className="absolute inset-0 bg-gray-200 animate-pulse z-10"></div>
+          <div className="absolute inset-0 bg-gray-200 animate-pulse z-10" />
         )}
-        {isVisible && (
-          <video
-            ref={videoRef}
-            src={src}
-            muted
-            autoPlay
-            loop
-            playsInline
-            preload="metadata"
-            className={`absolute inset-0 w-full h-full object-cover transition-opacity duration-300 ${isLoaded ? 'opacity-100' : 'opacity-0'}`}
-            onLoadedData={handleLoad}
-            onError={handleError}
-          />
-        )}
-        {isLoaded && autoplayFailed && (
-          <button
-            onClick={handleTapPlay}
-            className="absolute inset-0 z-10 flex items-center justify-center bg-black/20"
-            aria-label="Play video"
-          >
-            <span className="w-12 h-12 rounded-full bg-white/90 flex items-center justify-center shadow-lg">
-              <svg width="20" height="20" viewBox="0 0 20 20" fill="none" className="ml-0.5">
-                <path d="M5 3.5L16 10L5 16.5V3.5Z" fill="#111" />
-              </svg>
-            </span>
-          </button>
-        )}
+        <img
+          src={posterUrl(src)}
+          alt={alt}
+          className={`absolute inset-0 w-full h-full object-cover transition-opacity duration-300 ${isLoaded ? 'opacity-100' : 'opacity-0'}`}
+          onLoad={handleLoad}
+          onError={handleError}
+        />
       </div>
     );
   }
@@ -156,7 +69,7 @@ export default function LazyImage({
   return (
     <div className={`relative overflow-hidden ${className}`} style={{ width, height }}>
       {!isLoaded && (
-        <div className="absolute inset-0 bg-gray-200 animate-pulse z-10"></div>
+        <div className="absolute inset-0 bg-gray-200 animate-pulse z-10" />
       )}
       <Image
         src={src}

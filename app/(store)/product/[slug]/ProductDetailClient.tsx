@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import Image from 'next/image';
 import { useState, useEffect } from 'react';
+import { posterUrl } from '@/lib/media-url';
 import { supabase } from '@/lib/supabase';
 import { cachedQuery } from '@/lib/query-cache';
 import ProductCard from '@/components/ProductCard';
@@ -348,6 +349,7 @@ export default function ProductDetailClient({ slug }: { slug: string }) {
                         <video
                           key={product.images[selectedImage]}
                           src={product.images[selectedImage]}
+                          poster={posterUrl(product.images[selectedImage])}
                           className="w-full h-full object-cover"
                           autoPlay
                           muted
@@ -387,9 +389,11 @@ export default function ProductDetailClient({ slug }: { slug: string }) {
                           className={`relative aspect-square rounded-lg overflow-hidden border-2 transition-all cursor-pointer ${selectedImage === index ? 'border-gray-700 shadow-md' : 'border-gray-200 hover:border-gray-300'}`}
                         >
                           {thumbIsVid ? (
-                            <span className="absolute inset-0 flex items-center justify-center bg-gray-200">
-                              <i className="ri-play-circle-fill text-gray-500 text-3xl"></i>
-                            </span>
+                            <img
+                              src={posterUrl(image)}
+                              alt=""
+                              className="absolute inset-0 w-full h-full object-cover"
+                            />
                           ) : (
                             <Image
                               src={image}
