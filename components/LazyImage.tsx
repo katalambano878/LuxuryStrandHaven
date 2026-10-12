@@ -51,16 +51,22 @@ export default function LazyImage({
 
   if (isVideo) {
     return (
-      <div className={`relative overflow-hidden ${className}`} style={{ width, height }}>
-        {!isLoaded && (
-          <div className="absolute inset-0 bg-gray-200 animate-pulse z-10" />
-        )}
+      <div className={`relative overflow-hidden bg-gray-100 ${className}`} style={{ width, height }}>
         <img
           src={posterUrl(src)}
-          alt={alt}
-          className={`absolute inset-0 w-full h-full object-cover transition-opacity duration-300 ${isLoaded ? 'opacity-100' : 'opacity-0'}`}
-          onLoad={handleLoad}
-          onError={handleError}
+          alt=""
+          className="absolute inset-0 w-full h-full object-cover"
+        />
+        <video
+          src={src}
+          poster={posterUrl(src)}
+          muted
+          autoPlay
+          loop
+          playsInline
+          preload="metadata"
+          className="absolute inset-0 w-full h-full object-cover"
+          onLoadedData={handleLoad}
         />
       </div>
     );

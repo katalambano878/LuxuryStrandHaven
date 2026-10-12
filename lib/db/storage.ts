@@ -5,7 +5,9 @@
 // `supabase.storage.from(bucket).upload()/createSignedUrl()/getPublicUrl()`.
 
 import { createHmac } from "crypto";
+import { createReadStream } from "fs";
 import { promises as fs } from "fs";
+import { Readable } from "stream";
 import path from "path";
 
 const STORAGE_ROOT =
@@ -86,8 +88,103 @@ function guessContentType(p: string): string {
     webp: "image/webp",
     gif: "image/gif",
     pdf: "application/pdf",
+    mp4: "video/mp4",
+    m4v: "video/mp4",
+    mov: "video/quicktime",
+    webm: "video/webm",
+    ogg: "video/ogg",
   };
   return map[ext] || "application/octet-stream";
+}
+
+export interface StoredObject {
+  filePath: string;
+  size: number;
+  contentType: string;
+}
+
+export async function statObject(
+  bucket: string,
+  objectPath: string
+): Promise<StoredObject | null> {
+  try {
+    const filePath = safeJoin(bucket, objectPath);
+    const info = await fs.stat(filePath);
+    if (!info.isFile()) return null;
+    let contentType = guessContentType(objectPath);
+    try {
+      const meta = JSON.parse(await fs.readFile(filePath + ".meta.json", "utf8"));
+      if (meta.contentType && !contentType.startsWith("video/")) {
+        contentType = meta.contentType;
+      }
+    } catch {
+      // extension map is enough
+    }
+    return { filePath, size: info.size, contentType };
+  } catch {
+    return null;
+  }
+}
+
+function parseByteRange(
+  header: string,
+  size: number
+): { start: number; end: number } | "unsatisfiable" | null {
+  const match = /^bytes=(\d*)-(\d*)$/.exec(header.trim());
+  if (!match) return null;
+  const [, startRaw, endRaw] = match;
+  if (startRaw === "" && endRaw === "") return null;
+
+  if (startRaw === "") {
+    const suffix = Number(endRaw);
+    if (!Number.isFinite(suffix) || suffix <= 0) return "unsatisfiable";
+    return { start: Math.max(size - suffix, 0), end: size - 1 };
+  }
+
+  const start = Number(startRaw);
+  const end = endRaw === "" ? size - 1 : Number(endRaw);
+  if (!Number.isFinite(start) || start < 0 || start >= size) return "unsatisfiable";
+  return { start, end: Math.min(end, size - 1) };
+}
+
+/** Stream a stored file, including the byte ranges browsers require to play video. */
+export function serveStoredFile(
+  req: Request,
+  file: StoredObject,
+  cacheControl: string
+): Response {
+  const headers = new Headers({
+    "Content-Type": file.contentType,
+    "Accept-Ranges": "bytes",
+    "Cache-Control": cacheControl,
+    "Access-Control-Allow-Origin": "*",
+  });
+
+  const range = req.headers.get("range");
+  if (range) {
+    const parsed = parseByteRange(range, file.size);
+    if (parsed === "unsatisfiable") {
+      headers.set("Content-Range", `bytes */${file.size}`);
+      return new Response(null, { status: 416, headers });
+    }
+    if (parsed) {
+      const { start, end } = parsed;
+      headers.set("Content-Range", `bytes ${start}-${end}/${file.size}`);
+      headers.set("Content-Length", String(end - start + 1));
+      const stream = createReadStream(file.filePath, { start, end });
+      return new Response(Readable.toWeb(stream) as ReadableStream, {
+        status: 206,
+        headers,
+      });
+    }
+  }
+
+  headers.set("Content-Length", String(file.size));
+  const stream = createReadStream(file.filePath);
+  return new Response(Readable.toWeb(stream) as ReadableStream, {
+    status: 200,
+    headers,
+  });
 }
 
 interface BucketApi {

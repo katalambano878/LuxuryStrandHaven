@@ -1,4 +1,4 @@
-import { readObject, verifyObjectToken } from "@/lib/db/storage";
+import { serveStoredFile, statObject, verifyObjectToken } from "@/lib/db/storage";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -20,19 +20,13 @@ export async function GET(
     });
   }
 
-  const obj = await readObject(bucket, objectPath);
-  if (!obj) {
+  const file = await statObject(bucket, objectPath);
+  if (!file) {
     return new Response(JSON.stringify({ error: "Object not found" }), {
       status: 404,
       headers: { "Content-Type": "application/json" },
     });
   }
 
-  return new Response(new Uint8Array(obj.bytes), {
-    status: 200,
-    headers: {
-      "Content-Type": obj.contentType,
-      "Cache-Control": "private, max-age=300",
-    },
-  });
+  return serveStoredFile(req, file, "private, max-age=300");
 }

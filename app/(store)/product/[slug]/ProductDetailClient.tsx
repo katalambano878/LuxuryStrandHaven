@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import Image from 'next/image';
 import { useState, useEffect } from 'react';
-import { posterUrl } from '@/lib/media-url';
+import { isVideoUrl, posterUrl } from '@/lib/media-url';
 import { supabase } from '@/lib/supabase';
 import { cachedQuery } from '@/lib/query-cache';
 import ProductCard from '@/components/ProductCard';
@@ -342,7 +342,8 @@ export default function ProductDetailClient({ slug }: { slug: string }) {
             <div className="grid lg:grid-cols-2 gap-12">
               <div>
                 {(() => {
-                  const isVid = /\.(mp4|webm|ogg|mov|avi)$/i.test(product.images[selectedImage] || '');
+                  const current = product.images[selectedImage] || '';
+                  const isVid = isVideoUrl(current);
                   return (
                     <div className="relative aspect-square rounded-2xl overflow-hidden bg-gray-100 mb-4 shadow-lg border border-gray-100">
                       {isVid ? (
@@ -381,7 +382,7 @@ export default function ProductDetailClient({ slug }: { slug: string }) {
                 {product.images.length > 1 && (
                   <div className="grid grid-cols-4 gap-4">
                     {product.images.map((image: string, index: number) => {
-                      const thumbIsVid = /\.(mp4|webm|ogg|mov|avi)$/i.test(image);
+                      const thumbIsVid = isVideoUrl(image);
                       return (
                         <button
                           key={index}
