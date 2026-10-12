@@ -170,6 +170,21 @@ const ALL_FK_COLUMNS = new Set(
     .map((e) => e.column)
 );
 
+/**
+ * Tables that actually have an integer `position` column and expect to be
+ * sorted by it when embedded with `*`. Any table NOT in this set must not
+ * get an auto `ORDER BY position` even if the embed uses star, or Postgres
+ * raises `column "position" does not exist`.
+ *
+ * See `supabase/migrations/*.sql` for the authoritative column list:
+ *   - product_images.position integer
+ *   - categories.position integer
+ */
+const TABLES_WITH_POSITION_COLUMN = new Set([
+  "product_images",
+  "categories",
+]);
+
 function resolveEmbed(alias: string, secondPart: string): { table: string; fkColumn?: string } {
   if (secondPart && secondPart !== alias && ALL_FK_COLUMNS.has(secondPart)) {
     // fk-column form (e.g. groups:group_id, users:user_id, template:template_id)
@@ -670,9 +685,18 @@ class QueryBuilder implements PromiseLike<{ data: any; error: any; count: number
         let related: Row[] = [];
         if (parentIds.length) {
           const ph = parentIds.map((_, i) => `$${i + 1}`).join(",");
-          // Prefer stable gallery order when embed selects a position column
+          // Prefer stable gallery order when the embedded table has a
+          // `position` column (allowlist) and either (a) position is
+          // explicitly selected or (b) the caller used `*` and this table
+          // is known to use position for sorting. Tables not in the
+          // allowlist (e.g. product_variants) must NOT get an auto
+          // `ORDER BY position` — that raises
+          // `column "position" does not exist` and bubbles up as a 400.
+          const explicitPosition = embed.select.columns.includes("position");
+          const starWithPosition =
+            embed.select.star && TABLES_WITH_POSITION_COLUMN.has(embedTable);
           const orderBy =
-            embed.select.star || embed.select.columns.includes("position")
+            explicitPosition || starWithPosition
               ? ` ORDER BY ${ident("position")} ASC NULLS LAST`
               : "";
           const res = await pool.query(
