@@ -46,7 +46,6 @@ export default function AcademiaPage() {
   const intro = getSetting('academia_intro') || "Ghana's premier online hair education platform is launching soon. Learn wig making, HD lace, hair business and more — from industry experts.";
   const formatPrice = (price: number) =>
     price > 0 ? `GH₵ ${Number(price).toFixed(2)}` : 'Free';
-    price > 0 ? `GH₵ ${Number(price).toFixed(2)}` : 'Free';
 
   return (
     <main className="min-h-screen bg-black text-white overflow-hidden">
