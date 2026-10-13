@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import Image from 'next/image';
 import { useParams } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import CourseCheckout, { copyCourseLink } from '@/components/academia/CourseCheckout';
@@ -42,60 +41,84 @@ export default function CourseDetailPage() {
   const priceLabel = price > 0 ? `GH₵ ${price.toFixed(2)}` : 'Free';
 
   return (
-    <main className="min-h-screen bg-black text-white">
-      <div className="max-w-3xl mx-auto px-4 sm:px-6 pt-16 pb-24 text-center">
-        <Link href="/" className="inline-block mb-8">
-          <Image src="/haven%20logo%20white.png" alt="Luxury Strand Haven" width={120} height={60} className="object-contain" />
+    <main className="min-h-screen bg-[#0c0a09] text-white">
+      <div className="max-w-6xl mx-auto px-4 sm:px-6 pt-6 pb-20">
+        <Link href="/academia" className="inline-flex items-center gap-2 text-sm text-white/55 hover:text-white">
+          <i className="ri-arrow-left-line" />
+          All classes
         </Link>
 
         {loading ? (
-          <p className="text-white/50">Loading class…</p>
+          <div className="mt-8 grid lg:grid-cols-2 gap-10">
+            <div className="aspect-[4/5] rounded-3xl bg-white/5 animate-pulse" />
+            <div className="space-y-4 pt-6">
+              <div className="h-4 w-32 rounded bg-white/10" />
+              <div className="h-12 w-4/5 rounded bg-white/10" />
+              <div className="h-24 rounded bg-white/5" />
+            </div>
+          </div>
         ) : !course ? (
-          <div>
-            <h1 className="font-serif text-4xl mb-4">Class not found</h1>
-            <Link href="/academia" className="text-amber-400">Back to Academia</Link>
+          <div className="py-24 text-center">
+            <h1 className="font-serif text-4xl">Class not found</h1>
+            <Link href="/academia" className="mt-4 inline-block text-amber-300">Back to Academia</Link>
           </div>
         ) : (
-          <>
-            <h1 className="font-serif text-4xl sm:text-6xl font-bold leading-tight mb-6">
-              {course.title}
-            </h1>
-            <p className="text-white/70 text-lg sm:text-xl leading-relaxed max-w-2xl mx-auto mb-8 whitespace-pre-line">
-              {course.description || 'Details for this class will be added soon.'}
-            </p>
-            {course.thumbnail_url ? (
-              <img src={course.thumbnail_url} alt="" className="w-full rounded-2xl mb-8 object-cover max-h-[520px]" />
-            ) : null}
-            <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
-              <button
-                type="button"
-                onClick={() => setPaying(true)}
-                className="inline-flex items-center gap-2 bg-amber-500 hover:bg-amber-400 text-black font-bold px-6 py-3 rounded-full"
-              >
-                <i className="ri-secure-payment-line text-lg" />
-                {price > 0 ? `Pay ${priceLabel}` : 'Join class'}
-              </button>
-              <button
-                type="button"
-                onClick={async () => {
-                  await copyCourseLink(course.id);
-                  setCopied(true);
-                }}
-                className="inline-flex items-center gap-2 border border-white/20 text-white px-6 py-3 rounded-full"
-              >
-                <i className="ri-link" />
-                {copied ? 'Link copied' : 'Copy link'}
-              </button>
+          <div className="mt-6 grid items-start gap-8 lg:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)] lg:gap-14">
+            <div className="overflow-hidden rounded-3xl border border-white/10 bg-[#161311] lg:sticky lg:top-24">
+              {course.thumbnail_url ? (
+                <img src={course.thumbnail_url} alt="" className="w-full object-cover" />
+              ) : (
+                <div className="flex aspect-[4/5] items-center justify-center text-7xl">{course.icon || '📚'}</div>
+              )}
             </div>
-            <p className="text-white/40 text-sm mt-4">
-              {price > 0 ? 'After payment you will be taken to the class on Telegram.' : 'This class is free.'}
-            </p>
-          </>
+
+            <div className="lg:py-4">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-amber-300">Online class</p>
+              <h1 className="mt-3 font-serif text-4xl sm:text-5xl lg:text-6xl leading-[1.02]">
+                {course.title}
+              </h1>
+              <p className="mt-5 font-serif text-3xl text-amber-200">{priceLabel}</p>
+
+              <div className="mt-8 max-w-xl whitespace-pre-line text-base sm:text-lg leading-relaxed text-white/75">
+                {course.description || 'Details for this class will be added soon.'}
+              </div>
+
+              <div className="mt-8 rounded-2xl border border-white/10 bg-white/[0.03] p-5">
+                <p className="text-sm font-semibold text-white">How you join</p>
+                <ol className="mt-3 space-y-2 text-sm leading-relaxed text-white/65">
+                  <li>1. Pay for the class on this page.</li>
+                  <li>2. We confirm the payment.</li>
+                  <li>3. You are taken straight to the Telegram class.</li>
+                </ol>
+              </div>
+
+              <div className="mt-8 flex flex-col sm:flex-row gap-3">
+                <button
+                  type="button"
+                  onClick={() => setPaying(true)}
+                  className="inline-flex items-center justify-center gap-2 rounded-full bg-amber-400 px-7 py-3.5 text-sm font-bold text-black hover:bg-amber-300"
+                >
+                  <i className="ri-secure-payment-line text-lg" />
+                  {price > 0 ? `Pay ${priceLabel}` : 'Join class'}
+                </button>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    await copyCourseLink(course.id);
+                    setCopied(true);
+                  }}
+                  className="inline-flex items-center justify-center gap-2 rounded-full border border-white/15 px-7 py-3.5 text-sm font-semibold text-white hover:border-amber-300"
+                >
+                  <i className="ri-share-forward-line" />
+                  {copied ? 'Link copied' : 'Share class'}
+                </button>
+              </div>
+            </div>
+          </div>
         )}
       </div>
-      {paying && course ? (
-        <CourseCheckout course={course} onClose={() => setPaying(false)} />
-      ) : null}
+
+      {paying && course ? <CourseCheckout course={course} onClose={() => setPaying(false)} /> : null}
     </main>
   );
 }

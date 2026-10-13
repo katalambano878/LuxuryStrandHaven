@@ -2,18 +2,31 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
-import Image from 'next/image';
-import { motion } from 'framer-motion';
 import { supabase } from '@/lib/supabase';
 import CourseCheckout from '@/components/academia/CourseCheckout';
 import { useCMS } from '@/context/CMSContext';
 
+type Course = {
+  id: string;
+  title: string;
+  description: string | null;
+  icon: string | null;
+  price: number;
+  thumbnail_url: string | null;
+};
+
+function formatPrice(price: number) {
+  return price > 0 ? `GH₵ ${Number(price).toFixed(2)}` : 'Free';
+}
+
 export default function AcademiaPage() {
-  const [courses, setCourses] = useState<{ id: string; title: string; description: string | null; icon: string | null; price: number; thumbnail_url: string | null }[]>([]);
+  const [courses, setCourses] = useState<Course[]>([]);
   const [coursesLoading, setCoursesLoading] = useState(true);
   const [email, setEmail] = useState('');
   const [submitted, setSubmitted] = useState(false);
-  const [payCourse, setPayCourse] = useState<(typeof courses)[number] | null>(null);
+  const [payCourse, setPayCourse] = useState<Course | null>(null);
+  const { getSetting } = useCMS();
+  const intro = getSetting('academia_intro') || "Ghana's premier online hair education platform. Learn wig making, HD lace, hair business and more — from industry experts.";
 
   useEffect(() => {
     async function load() {
@@ -26,7 +39,7 @@ export default function AcademiaPage() {
           .order('created_at', { ascending: false });
         if (!error) setCourses(data ?? []);
       } catch {
-        // keep default empty
+        // keep empty
       } finally {
         setCoursesLoading(false);
       }
@@ -42,198 +55,122 @@ export default function AcademiaPage() {
     }
   }
 
-  const { getSetting } = useCMS();
-  const intro = getSetting('academia_intro') || "Ghana's premier online hair education platform is launching soon. Learn wig making, HD lace, hair business and more — from industry experts.";
-  const formatPrice = (price: number) =>
-    price > 0 ? `GH₵ ${Number(price).toFixed(2)}` : 'Free';
-
   return (
-    <main className="min-h-screen bg-black text-white overflow-hidden">
-      {/* Background gradient orbs */}
-      <div aria-hidden className="pointer-events-none fixed inset-0 overflow-hidden">
-        <div className="absolute -top-40 -left-40 w-[600px] h-[600px] rounded-full bg-amber-900/20 blur-3xl" />
-        <div className="absolute -bottom-40 -right-40 w-[600px] h-[600px] rounded-full bg-amber-900/15 blur-3xl" />
-      </div>
-
-      <div className="relative z-10 max-w-5xl mx-auto px-4 sm:px-6 pt-20 pb-24 flex flex-col items-center text-center">
-
-        {/* Logo */}
-        <motion.div
-          initial={{ opacity: 0, y: -16 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.6 }}
-          className="mb-10"
-        >
-          <Image
-            src="/haven%20logo%20white.png"
-            alt="Luxury Strand Haven"
-            width={120}
-            height={60}
-            className="object-contain"
-          />
-        </motion.div>
-
-        {/* Coming Soon badge */}
-        <motion.div
-          initial={{ opacity: 0, scale: 0.85 }}
-          animate={{ opacity: 1, scale: 1 }}
-          transition={{ delay: 0.1, type: 'spring', stiffness: 200, damping: 20 }}
-          className="inline-flex items-center gap-2 px-5 py-2 rounded-full border border-amber-500/50 bg-amber-500/10 mb-8"
-        >
-          <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
-          <span className="text-amber-400 text-xs font-bold tracking-[0.2em] uppercase">Coming Soon</span>
-        </motion.div>
-
-        {/* Headline */}
-        <motion.h1
-          initial={{ opacity: 0, y: 24 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.2, duration: 0.8 }}
-          className="font-serif text-5xl sm:text-6xl lg:text-7xl font-bold leading-tight mb-6"
-        >
-          Hair{' '}
-          <span className="text-transparent bg-clip-text bg-gradient-to-r from-amber-400 to-yellow-300">
-            Academia
-          </span>
-        </motion.h1>
-
-        {/* Sub */}
-        <motion.p
-          initial={{ opacity: 0, y: 16 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.35, duration: 0.7 }}
-          className="text-white/60 text-lg sm:text-xl max-w-xl leading-relaxed mb-14"
-        >
-          {intro}
-        </motion.p>
-
-        {/* Courses grid */}
-        <motion.div
-          initial={{ opacity: 0, y: 30 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.45, duration: 0.7 }}
-          className="grid grid-cols-1 sm:grid-cols-2 gap-4 w-full mb-14"
-        >
-          {coursesLoading ? (
-            <div className="col-span-2 py-12 text-white/50">Loading courses…</div>
-          ) : courses.length === 0 ? (
-            <div className="col-span-2 py-12 text-white/50">Courses coming soon. Check back later.</div>
-          ) : (
-            courses.map((course) => (
-              <div
-                key={course.id}
-                className="text-left rounded-2xl border border-white/10 bg-white/5 backdrop-blur-sm hover:border-amber-500/40 transition-all group overflow-hidden"
-              >
-                {course.thumbnail_url ? (
-                  <div className="aspect-[16/10] bg-white/5">
-                    <img src={course.thumbnail_url} alt="" className="w-full h-full object-cover" />
-                  </div>
-                ) : null}
-                <div className="p-6">
-                <span className="text-3xl mb-3 block">{course.icon || '📚'}</span>
-                <h3 className="font-semibold text-white mb-2 group-hover:text-amber-400 transition-colors">
-                  <Link href={`/academia/course/${course.id}`}>{course.title}</Link>
-                </h3>
-                <p className="text-white/50 text-sm leading-relaxed mb-4">
-                  {course.description || 'Online course — watch and learn.'}
-                </p>
-                <div className="flex items-center justify-between gap-3 flex-wrap">
-                  <span className="text-amber-400 font-bold">
-                    {formatPrice(Number(course.price) || 0)}
-                  </span>
-                  <div className="flex flex-wrap gap-2">
-                    {Number(course.price) > 0 ? (
-                      <button
-                        type="button"
-                        onClick={() => setPayCourse(course)}
-                        className="inline-flex items-center gap-2 bg-amber-500 hover:bg-amber-400 text-black font-bold px-4 py-2 rounded-full text-sm transition-all"
-                      >
-                        <i className="ri-secure-payment-line text-lg" />
-                        Pay {formatPrice(Number(course.price))}
-                      </button>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={() => setPayCourse(course)}
-                        className="inline-flex items-center gap-2 bg-sky-500 hover:bg-sky-400 text-white font-bold px-4 py-2 rounded-full text-sm transition-all"
-                      >
-                        <i className="ri-telegram-line text-lg" />
-                        Join class
-                      </button>
-                    )}
-                  </div>
-                </div>
-                </div>
-              </div>
-            ))
-          )}
-        </motion.div>
-
-        {/* Notify form */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.6, duration: 0.7 }}
-          className="w-full max-w-md mb-10"
-        >
-          <p className="text-white/50 text-sm mb-4 uppercase tracking-widest font-semibold">
-            Get notified when we launch
+    <main className="min-h-screen bg-[#0c0a09] text-white">
+      <section className="relative overflow-hidden border-b border-white/10">
+        <div aria-hidden className="pointer-events-none absolute inset-0">
+          <div className="absolute -top-32 left-1/2 h-72 w-[40rem] -translate-x-1/2 rounded-full bg-amber-500/10 blur-3xl" />
+        </div>
+        <div className="relative max-w-6xl mx-auto px-4 sm:px-6 pt-14 pb-12 sm:pt-20 sm:pb-16">
+          <p className="text-amber-300 text-[11px] font-semibold tracking-[0.28em] uppercase">Luxury Strand Haven</p>
+          <h1 className="font-serif text-5xl sm:text-6xl lg:text-7xl mt-4 leading-[0.95]">
+            Hair <span className="text-amber-300">Academia</span>
+          </h1>
+          <p className="mt-6 max-w-2xl text-base sm:text-lg leading-relaxed text-white/70 whitespace-pre-line">
+            {intro}
           </p>
+        </div>
+      </section>
+
+      <section className="max-w-6xl mx-auto px-4 sm:px-6 py-12 sm:py-16">
+        <div className="flex items-end justify-between gap-4 mb-8">
+          <div>
+            <p className="text-amber-300/80 text-[11px] font-semibold tracking-[0.22em] uppercase">Classes</p>
+            <h2 className="font-serif text-3xl sm:text-4xl mt-2">Online courses</h2>
+          </div>
+          <p className="hidden sm:block text-sm text-white/45">{courses.length} {courses.length === 1 ? 'class' : 'classes'}</p>
+        </div>
+
+        {coursesLoading ? (
+          <div className="grid sm:grid-cols-2 gap-6">
+            {[0, 1].map((item) => (
+              <div key={item} className="h-[28rem] rounded-3xl bg-white/5 animate-pulse" />
+            ))}
+          </div>
+        ) : courses.length === 0 ? (
+          <div className="rounded-3xl border border-white/10 bg-white/5 px-6 py-16 text-center text-white/60">
+            Classes will appear here once they are published.
+          </div>
+        ) : (
+          <div className="grid sm:grid-cols-2 gap-6 lg:gap-8">
+            {courses.map((course) => {
+              const price = Number(course.price) || 0;
+              return (
+                <article key={course.id} className="group flex flex-col overflow-hidden rounded-3xl border border-white/10 bg-[#161311] shadow-[0_20px_60px_rgba(0,0,0,0.35)]">
+                  <Link href={`/academia/course/${course.id}`} className="relative block aspect-[4/3] overflow-hidden bg-[#221c16]">
+                    {course.thumbnail_url ? (
+                      <img
+                        src={course.thumbnail_url}
+                        alt=""
+                        className="h-full w-full object-cover transition duration-700 group-hover:scale-[1.03]"
+                      />
+                    ) : (
+                      <div className="flex h-full items-center justify-center text-6xl">{course.icon || '📚'}</div>
+                    )}
+                    <div className="absolute inset-0 bg-gradient-to-t from-[#161311] via-transparent to-black/10" />
+                    <span className="absolute left-4 top-4 rounded-full bg-black/70 px-3 py-1 text-[11px] font-semibold tracking-wide text-amber-200 backdrop-blur">
+                      Online class
+                    </span>
+                    <span className="absolute right-4 top-4 rounded-full bg-amber-400 px-3 py-1 text-sm font-bold text-black">
+                      {formatPrice(price)}
+                    </span>
+                  </Link>
+
+                  <div className="flex flex-1 flex-col px-5 pb-5 pt-4 sm:px-6 sm:pb-6">
+                    <h3 className="font-serif text-2xl sm:text-[1.7rem] leading-tight text-white">
+                      <Link href={`/academia/course/${course.id}`} className="hover:text-amber-200">
+                        {course.title}
+                      </Link>
+                    </h3>
+                    <p className="mt-3 line-clamp-3 text-sm leading-relaxed text-white/60">
+                      {course.description || 'Open the class page to see what you will learn.'}
+                    </p>
+                    <div className="mt-6 flex items-center gap-3">
+                      <Link
+                        href={`/academia/course/${course.id}`}
+                        className="inline-flex flex-1 items-center justify-center rounded-full bg-white px-5 py-3 text-sm font-semibold text-black transition hover:bg-amber-200"
+                      >
+                        View class
+                      </Link>
+                      <button
+                        type="button"
+                        onClick={() => setPayCourse(course)}
+                        className="inline-flex items-center justify-center rounded-full border border-white/15 px-5 py-3 text-sm font-semibold text-white transition hover:border-amber-300 hover:text-amber-200"
+                      >
+                        {price > 0 ? 'Pay now' : 'Join'}
+                      </button>
+                    </div>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        )}
+
+        <div className="mt-16 max-w-xl">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-white/40">New classes</p>
+          <h3 className="font-serif text-2xl mt-2">Get a note when the next class opens</h3>
           {submitted ? (
-            <div className="flex items-center justify-center gap-2 py-4 px-6 rounded-full bg-amber-500/20 border border-amber-500/40 text-amber-400 font-semibold">
-              <i className="ri-check-line text-lg" />
-              You&apos;re on the list — we&apos;ll let you know!
-            </div>
+            <p className="mt-4 text-amber-200">You are on the list.</p>
           ) : (
-            <form onSubmit={handleNotify} className="flex gap-2">
+            <form onSubmit={handleNotify} className="mt-4 flex flex-col sm:flex-row gap-2">
               <input
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                placeholder="Enter your email address"
+                placeholder="Email address"
                 required
-                className="flex-1 bg-white/10 border border-white/20 text-white placeholder-white/40 rounded-full px-5 py-3 text-sm focus:outline-none focus:border-amber-500/60 focus:bg-white/15 transition-all"
+                className="flex-1 rounded-full border border-white/15 bg-white/5 px-5 py-3 text-sm outline-none focus:border-amber-400"
               />
-              <button
-                type="submit"
-                className="bg-amber-500 hover:bg-amber-400 text-black font-bold px-6 py-3 rounded-full text-sm transition-all hover:scale-105 whitespace-nowrap"
-              >
-                Notify Me
+              <button type="submit" className="rounded-full bg-amber-400 px-6 py-3 text-sm font-bold text-black">
+                Notify me
               </button>
             </form>
           )}
-        </motion.div>
+        </div>
+      </section>
 
-        {/* Divider */}
-        <div className="w-px h-10 bg-white/20 mb-10" />
-
-        {/* Back to shop CTA */}
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ delay: 0.75 }}
-          className="flex flex-col sm:flex-row items-center gap-4"
-        >
-          <Link
-            href="/shop"
-            className="inline-flex items-center gap-2 bg-white text-black hover:bg-gray-100 px-7 py-3.5 rounded-full font-bold text-sm transition-all hover:scale-105 shadow-xl"
-          >
-            <i className="ri-shopping-bag-line" />
-            Shop Our Collection
-          </Link>
-          <Link
-            href="/"
-            className="inline-flex items-center gap-2 border border-white/20 text-white/70 hover:text-white hover:border-white/40 px-7 py-3.5 rounded-full font-semibold text-sm transition-all"
-          >
-            <i className="ri-arrow-left-line" />
-            Back to Home
-          </Link>
-        </motion.div>
-      </div>
-
-      {payCourse ? (
-        <CourseCheckout course={payCourse} onClose={() => setPayCourse(null)} />
-      ) : null}
+      {payCourse ? <CourseCheckout course={payCourse} onClose={() => setPayCourse(null)} /> : null}
     </main>
   );
 }
