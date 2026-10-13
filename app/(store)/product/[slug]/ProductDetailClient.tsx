@@ -357,7 +357,7 @@ export default function ProductDetailClient({ slug }: { slug: string }) {
                           loop
                           playsInline
                           controls
-                          preload="metadata"
+                          preload="auto"
                         />
                       ) : (
                         <Image

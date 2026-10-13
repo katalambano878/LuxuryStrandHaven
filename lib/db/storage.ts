@@ -212,7 +212,18 @@ export async function saveUpload(
   await fs.writeFile(tmpIn, bytes);
   try {
     await fs.mkdir(path.dirname(destFile), { recursive: true });
-    await runFfmpeg(["-y", "-i", tmpIn, "-c", "copy", "-movflags", "+faststart", destFile]);
+    const videoArgs = [
+      "-y", "-i", tmpIn,
+      "-vf", "scale='min(720,iw)':-2",
+      "-c:v", "libx264", "-preset", "veryfast", "-profile:v", "main", "-pix_fmt", "yuv420p",
+      "-b:v", "2500k", "-maxrate", "3200k", "-bufsize", "5000k",
+      "-movflags", "+faststart",
+    ];
+    try {
+      await runFfmpeg([...videoArgs, "-c:a", "aac", "-b:a", "128k", destFile]);
+    } catch {
+      await runFfmpeg([...videoArgs, "-an", destFile]);
+    }
     await runFfmpeg(["-y", "-ss", "0.4", "-i", destFile, "-frames:v", "1", "-q:v", "4", posterFile]).catch(
       () => runFfmpeg(["-y", "-i", destFile, "-frames:v", "1", "-q:v", "4", posterFile])
     );
