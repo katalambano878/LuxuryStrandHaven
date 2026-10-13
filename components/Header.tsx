@@ -52,6 +52,12 @@ export default function Header() {
     ...(savedNavLinks.some(l => l.href === '/') ? [] : [{ label: 'Home', href: '/' }]),
     ...savedNavLinks,
   ];
+  if (!navLinks.some((link) => link.href === '/academia' || link.href.startsWith('/academia/'))) {
+    const aboutIndex = navLinks.findIndex((link) => link.href === '/about');
+    const academiaLink = { label: 'Academia', href: '/academia' };
+    if (aboutIndex >= 0) navLinks.splice(aboutIndex, 0, academiaLink);
+    else navLinks.push(academiaLink);
+  }
 
   useEffect(() => {
     const updateWishlistCount = () => {

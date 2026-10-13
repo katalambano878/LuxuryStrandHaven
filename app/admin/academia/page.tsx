@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import ImageUpload from '@/components/admin/ImageUpload';
+import { copyCourseLink, coursePublicUrl } from '@/components/academia/CourseCheckout';
 
 const inputClass = 'w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-gray-600 focus:border-gray-600';
 
@@ -10,7 +11,9 @@ export default function AdminAcademiaPage() {
   const [courses, setCourses] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [showModal, setShowModal] = useState(false);
+  const [intro, setIntro] = useState('');
+  const [introSaving, setIntroSaving] = useState(false);
+  const [copied, setCopied] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState({
     title: '',
@@ -42,7 +45,21 @@ export default function AdminAcademiaPage() {
 
   useEffect(() => {
     fetchCourses();
+    supabase.from('store_settings').select('value').eq('key', 'academia_intro').maybeSingle().then(({ data }) => {
+      const value = data?.value;
+      setIntro(typeof value === 'string' ? value : value ? String(value).replace(/^"|"$/g, '') : '');
+    });
   }, []);
+
+  const saveIntro = async () => {
+    setIntroSaving(true);
+    const { error } = await supabase.from('store_settings').upsert(
+      { key: 'academia_intro', value: intro, description: 'Intro text on the Academia page' },
+      { onConflict: 'key' }
+    );
+    setIntroSaving(false);
+    if (error) alert('Could not save the page description: ' + error.message);
+  };
 
   const openAdd = () => {
     setEditingId(null);
@@ -83,16 +100,18 @@ export default function AdminAcademiaPage() {
         thumbnail_url: form.thumbnail_url.trim() || null,
         status: form.status,
       };
+      let savedId = editingId;
       if (editingId) {
         const { error } = await supabase.from('academia_courses').update(payload).eq('id', editingId);
         if (error) throw error;
-        alert('Course updated');
       } else {
-        const { error } = await supabase.from('academia_courses').insert([payload]);
+        const { data, error } = await supabase.from('academia_courses').insert([payload]).select('id').single();
         if (error) throw error;
-        alert('Course created');
+        savedId = data?.id ?? null;
       }
       setShowModal(false);
+      setShareId(savedId);
+      setCopied(false);
       fetchCourses();
     } catch (err: any) {
       alert('Error saving: ' + (err.message ?? 'Unknown'));
@@ -133,7 +152,46 @@ export default function AdminAcademiaPage() {
         </button>
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-3">
+        <div>
+          <h2 className="text-lg font-bold text-gray-900">Page description</h2>
+          <p className="text-sm text-gray-500">This is the paragraph under “Hair Academia” on the public page.</p>
+        </div>
+        <textarea
+          value={intro}
+          onChange={(e) => setIntro(e.target.value)}
+          rows={4}
+          className={inputClass + ' resize-none'}
+          placeholder="Ghana's premier online hair education platform..."
+        />
+        <button
+          type="button"
+          onClick={saveIntro}
+          disabled={introSaving}
+          className="bg-gray-900 text-white px-4 py-2 rounded-lg font-semibold disabled:opacity-60"
+        >
+          {introSaving ? 'Saving…' : 'Save page description'}
+        </button>
+      </div>
+
+      {shareId ? (
+        <div className="bg-green-50 border border-green-200 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div>
+            <p className="font-semibold text-green-900">Course link</p>
+            <p className="text-sm text-green-800 break-all">{coursePublicUrl(shareId)}</p>
+          </div>
+          <button
+            type="button"
+            onClick={async () => {
+              await copyCourseLink(shareId);
+              setCopied(true);
+            }}
+            className="shrink-0 bg-gray-900 text-white px-4 py-2 rounded-lg font-semibold"
+          >
+            {copied ? 'Copied' : 'Copy link'}
+          </button>
+        </div>
+      ) : null}
         <div className="bg-white rounded-xl border border-gray-200 p-4">
           <p className="text-sm text-gray-600">Total Courses</p>
           <p className="text-2xl font-bold text-gray-900">{courses.length}</p>
@@ -172,7 +230,10 @@ export default function AdminAcademiaPage() {
                       ) : (
                         <span className="w-12 h-12 rounded-lg bg-gray-100 flex items-center justify-center text-xl">{c.icon || '📚'}</span>
                       )}
-                      <span className="font-medium text-gray-900">{c.title}</span>
+                      <div>
+                        <span className="font-medium text-gray-900">{c.title}</span>
+                        <p className="text-sm text-gray-500 line-clamp-2 mt-1">{c.description || 'No description yet'}</p>
+                      </div>
                     </div>
                   </td>
                   <td className="py-3 px-4 text-gray-700">{formatPrice(c.price)}</td>
@@ -198,6 +259,18 @@ export default function AdminAcademiaPage() {
                   </td>
                   <td className="py-3 px-4">
                     <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          await copyCourseLink(c.id);
+                          setShareId(c.id);
+                          setCopied(true);
+                        }}
+                        className="p-2 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg"
+                        title="Copy course link"
+                      >
+                        <i className="ri-share-line" />
+                      </button>
                       <button onClick={() => openEdit(c)} className="p-2 text-gray-600 hover:text-blue-600 hover:bg-blue-50 rounded-lg">
                         <i className="ri-edit-line" />
                       </button>
@@ -235,14 +308,15 @@ export default function AdminAcademiaPage() {
                 />
               </div>
               <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-1">Description</label>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">Course description</label>
                 <textarea
                   value={form.description}
                   onChange={(e) => setForm({ ...form, description: e.target.value })}
                   className={inputClass + ' resize-none'}
-                  rows={3}
-                  placeholder="Short description for the card"
+                  rows={6}
+                  placeholder="This is the text people see under the class title. Explain who the class is for and what they will learn."
                 />
+                <p className="text-xs text-gray-500 mt-1">Shown on the class page and on the Academia list. You can edit it any time.</p>
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
