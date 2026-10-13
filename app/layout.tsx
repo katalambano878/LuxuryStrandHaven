@@ -1,18 +1,8 @@
 import type { Metadata } from "next";
 import Script from "next/script";
-import { Pacifico, Playfair_Display, Outfit } from "next/font/google";
 import { CartProvider } from "@/context/CartContext";
 import { WishlistProvider } from "@/context/WishlistContext";
 import "./globals.css";
-
-const pacifico = Pacifico({ weight: '400', subsets: ['latin'], variable: '--font-pacifico' });
-const playfair = Playfair_Display({
-  weight: ['400', '500', '600', '700'],
-  style: ['normal', 'italic'],
-  subsets: ['latin'],
-  variable: '--font-playfair',
-});
-const outfit = Outfit({ weight: ['300', '400', '500', '600', '700'], subsets: ['latin'], variable: '--font-outfit' });
 
 const siteUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://luxury-strand-haven.vercel.app';
 const siteName = 'Luxury Strand Haven';
@@ -141,6 +131,12 @@ export default function RootLayout({
   return (
     <html lang="en-GH">
       <head>
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="" />
+        <link
+          href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Pacifico&family=Playfair+Display:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap"
+          rel="stylesheet"
+        />
         {/* Force favicon / app icon to use the site logo. These hardcoded
             <link>/<meta> tags take precedence over anything cached by the
             browser, the CDN, or social-media scrapers. */}
@@ -272,7 +268,7 @@ export default function RootLayout({
         />
       )}
 
-      <body className={`antialiased font-sans overflow-x-hidden ${pacifico.variable} ${playfair.variable} ${outfit.variable}`}>
+      <body className="antialiased font-sans overflow-x-hidden">
         <a
           href="#main-content"
           className="sr-only focus:not-sr-only focus:absolute focus:top-4 focus:left-4 focus:z-[10000] focus:px-6 focus:py-3 focus:bg-gray-900 focus:text-white focus:rounded-lg focus:font-semibold focus:shadow-lg"
