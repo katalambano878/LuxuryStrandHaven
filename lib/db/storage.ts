@@ -5,9 +5,11 @@
 // `supabase.storage.from(bucket).upload()/createSignedUrl()/getPublicUrl()`.
 
 import { createHmac } from "crypto";
+import { spawn } from "child_process";
 import { createReadStream } from "fs";
 import { promises as fs } from "fs";
 import { Readable } from "stream";
+import os from "os";
 import path from "path";
 
 const STORAGE_ROOT =
@@ -145,6 +147,80 @@ function parseByteRange(
   const end = endRaw === "" ? size - 1 : Number(endRaw);
   if (!Number.isFinite(start) || start < 0 || start >= size) return "unsatisfiable";
   return { start, end: Math.min(end, size - 1) };
+}
+
+function runFfmpeg(args: string[]): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const child = spawn("ffmpeg", args, { stdio: "ignore" });
+    child.on("error", reject);
+    child.on("close", (code) => {
+      if (code === 0) resolve();
+      else reject(new Error(`ffmpeg exited ${code}`));
+    });
+  });
+}
+
+const VIDEO_EXT = /\.(mov|mp4|m4v|webm|ogg|avi|qt)$/i;
+
+/** Browsers send storage uploads as multipart form data. Keep only the file bytes. */
+export async function readUploadBody(
+  req: Request
+): Promise<{ bytes: Buffer; contentType: string }> {
+  const header = req.headers.get("content-type") || "application/octet-stream";
+  if (header.includes("multipart/form-data")) {
+    const form = await req.formData();
+    for (const value of form.values()) {
+      if (value instanceof File && value.size > 0) {
+        return {
+          bytes: Buffer.from(await value.arrayBuffer()),
+          contentType: value.type || "application/octet-stream",
+        };
+      }
+    }
+    throw new Error("Upload did not include a file");
+  }
+  return {
+    bytes: Buffer.from(await req.arrayBuffer()),
+    contentType: header.split(";")[0].trim() || "application/octet-stream",
+  };
+}
+
+/**
+ * Save an upload. Videos are remuxed to a faststart MP4 and a JPEG poster so
+ * Chrome can play them and product cards have a still frame.
+ * Returns the object path that was actually written.
+ */
+export async function saveUpload(
+  bucket: string,
+  objectPath: string,
+  bytes: Buffer,
+  contentType: string
+): Promise<{ path: string; contentType: string }> {
+  const video =
+    contentType.startsWith("video/") || VIDEO_EXT.test(objectPath);
+  if (!video) {
+    const storage = createStorageClient();
+    const saved = await storage.from(bucket).upload(objectPath, bytes, { contentType, upsert: true });
+    if (saved.error) throw new Error(saved.error.message);
+    return { path: objectPath, contentType };
+  }
+
+  const destPath = objectPath.replace(/\.(mov|m4v|qt|avi|webm|ogg)$/i, ".mp4");
+  const destFile = safeJoin(bucket, destPath);
+  const posterFile = destFile.replace(/\.mp4$/i, ".poster.jpg");
+  const tmpIn = path.join(os.tmpdir(), `upload-${Date.now()}-${path.basename(objectPath)}`);
+  await fs.writeFile(tmpIn, bytes);
+  try {
+    await fs.mkdir(path.dirname(destFile), { recursive: true });
+    await runFfmpeg(["-y", "-i", tmpIn, "-c", "copy", "-movflags", "+faststart", destFile]);
+    await runFfmpeg(["-y", "-ss", "0.4", "-i", destFile, "-frames:v", "1", "-q:v", "4", posterFile]).catch(
+      () => runFfmpeg(["-y", "-i", destFile, "-frames:v", "1", "-q:v", "4", posterFile])
+    );
+    await fs.writeFile(destFile + ".meta.json", JSON.stringify({ contentType: "video/mp4" }));
+    return { path: destPath, contentType: "video/mp4" };
+  } finally {
+    await fs.rm(tmpIn, { force: true });
+  }
 }
 
 /** Stream a stored file, including the byte ranges browsers require to play video. */

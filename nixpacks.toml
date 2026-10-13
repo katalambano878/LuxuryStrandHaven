@@ -1,0 +1,3 @@
+# ffmpeg remuxes uploaded videos into browser-playable MP4s.
+[phases.setup]
+aptPkgs = ["ffmpeg"]

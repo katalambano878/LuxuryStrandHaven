@@ -312,21 +312,26 @@ export default function ProductForm({ initialData, isEditMode = false }: Product
 
             setUploading(true);
             const file = e.target.files[0];
-            const fileExt = file.name.split('.').pop();
+            const originalExt = (file.name.split('.').pop() || 'bin').toLowerCase();
+            const isVideo = VIDEO_TYPES.includes(file.type) || /^(mp4|mov|m4v|webm|ogg|avi)$/.test(originalExt);
+            const fileExt = isVideo ? 'mp4' : originalExt;
             const fileName = `${Math.random()}.${fileExt}`;
             const filePath = `${fileName}`;
 
-            const { error: uploadError } = await supabase.storage
+            const { data: uploaded, error: uploadError } = await supabase.storage
                 .from('products')
                 .upload(filePath, file);
 
             if (uploadError) throw uploadError;
 
+            const storedPath = (uploaded as { path?: string } | null)?.path || filePath;
             const { data: { publicUrl } } = supabase.storage
                 .from('products')
-                .getPublicUrl(filePath);
+                .getPublicUrl(storedPath);
+            const relativeUrl = publicUrl.match(/\/storage\/v1\/object\/public\/.+$/)?.[0]
+                || `/storage/v1/object/public/products/${storedPath}`;
 
-            setImages([...images, { url: publicUrl, position: images.length, is_video: VIDEO_TYPES.includes(file.type) }]);
+            setImages([...images, { url: relativeUrl, position: images.length, is_video: isVideo }]);
 
         } catch (error: any) {
             alert('Error uploading file: ' + error.message);

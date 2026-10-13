@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createStorageClient } from "@/lib/db/storage";
+import { createStorageClient, readUploadBody, saveUpload } from "@/lib/db/storage";
 import { isPlainPostgres } from "@/lib/db/mode";
 
 export const dynamic = "force-dynamic";
@@ -33,28 +33,32 @@ export async function POST(
 
   const { bucket, path } = await ctx.params;
   const objectPath = path.map(decodeURIComponent).join("/");
-  const upsert = (req.headers.get("x-upsert") || "").toLowerCase() === "true";
-  const contentType =
-    req.headers.get("content-type") || "application/octet-stream";
 
-  const buf = Buffer.from(await req.arrayBuffer());
-  const storage = createStorageClient();
-  const { data, error } = await storage.from(bucket).upload(objectPath, buf, {
-    contentType,
-    upsert,
-  });
-
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 400, headers: cors() });
+  let upload: { bytes: Buffer; contentType: string };
+  try {
+    upload = await readUploadBody(req);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Invalid upload";
+    return NextResponse.json({ error: message }, { status: 400, headers: cors() });
   }
 
-  const { data: pub } = storage.from(bucket).getPublicUrl(objectPath);
+  let saved: { path: string; contentType: string };
+  try {
+    saved = await saveUpload(bucket, objectPath, upload.bytes, upload.contentType);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Upload failed";
+    return NextResponse.json({ error: message }, { status: 400, headers: cors() });
+  }
+
+  const storage = createStorageClient();
+  const { data: pub } = storage.from(bucket).getPublicUrl(saved.path);
+  const relative = pub.publicUrl.replace(/^https?:\/\/[^/]+/, "");
   return NextResponse.json(
     {
-      Key: `${bucket}/${objectPath}`,
-      Id: data?.path,
-      ...data,
-      publicUrl: pub.publicUrl,
+      Key: `${bucket}/${saved.path}`,
+      Id: saved.path,
+      path: saved.path,
+      publicUrl: relative,
     },
     { headers: cors() }
   );
