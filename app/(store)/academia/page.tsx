@@ -7,17 +7,21 @@ import { motion } from 'framer-motion';
 import { supabase } from '@/lib/supabase';
 
 export default function AcademiaPage() {
-  const [courses, setCourses] = useState<{ id: string; title: string; description: string | null; icon: string | null; price: number; youtube_url: string | null; telegram_url: string | null; thumbnail_url: string | null }[]>([]);
+  const [courses, setCourses] = useState<{ id: string; title: string; description: string | null; icon: string | null; price: number; thumbnail_url: string | null }[]>([]);
   const [coursesLoading, setCoursesLoading] = useState(true);
   const [email, setEmail] = useState('');
   const [submitted, setSubmitted] = useState(false);
+  const [payingId, setPayingId] = useState<string | null>(null);
+  const [payCourse, setPayCourse] = useState<(typeof courses)[number] | null>(null);
+  const [payForm, setPayForm] = useState({ name: '', email: '', phone: '' });
+  const [payError, setPayError] = useState('');
 
   useEffect(() => {
     async function load() {
       try {
         const { data, error } = await supabase
           .from('academia_courses')
-          .select('id, title, description, icon, price, youtube_url, telegram_url, thumbnail_url')
+          .select('id, title, description, icon, price, thumbnail_url')
           .eq('status', 'active')
           .order('sort_order', { ascending: true })
           .order('created_at', { ascending: false });
@@ -38,6 +42,38 @@ export default function AcademiaPage() {
       setEmail('');
     }
   }
+
+  async function startPayment(e: React.FormEvent) {
+    e.preventDefault();
+    if (!payCourse) return;
+    setPayError('');
+    setPayingId(payCourse.id);
+    try {
+      const res = await fetch('/api/academia/checkout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          courseId: payCourse.id,
+          name: payForm.name,
+          email: payForm.email,
+          phone: payForm.phone,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success || !data.url) {
+        setPayError(data.message || 'Could not start payment.');
+        setPayingId(null);
+        return;
+      }
+      window.location.href = data.url;
+    } catch {
+      setPayError('Could not start payment. Please try again.');
+      setPayingId(null);
+    }
+  }
+
+  const formatPrice = (price: number) =>
+    price > 0 ? `GH₵ ${Number(price).toFixed(2)}` : 'Free';
 
   return (
     <main className="min-h-screen bg-black text-white overflow-hidden">
@@ -132,34 +168,34 @@ export default function AcademiaPage() {
                 </p>
                 <div className="flex items-center justify-between gap-3 flex-wrap">
                   <span className="text-amber-400 font-bold">
-                    {course.price != null && course.price > 0 ? `GH₵ ${Number(course.price).toFixed(2)}` : 'Free'}
+                    {formatPrice(Number(course.price) || 0)}
                   </span>
                   <div className="flex flex-wrap gap-2">
-                    {course.youtube_url ? (
-                      <a
-                        href={course.youtube_url}
-                        target="_blank"
-                        rel="noopener noreferrer"
+                    {Number(course.price) > 0 ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPayCourse(course);
+                          setPayError('');
+                        }}
                         className="inline-flex items-center gap-2 bg-amber-500 hover:bg-amber-400 text-black font-bold px-4 py-2 rounded-full text-sm transition-all"
                       >
-                        <i className="ri-youtube-line text-lg" />
-                        YouTube
-                      </a>
-                    ) : null}
-                    {course.telegram_url ? (
-                      <a
-                        href={course.telegram_url}
-                        target="_blank"
-                        rel="noopener noreferrer"
+                        <i className="ri-secure-payment-line text-lg" />
+                        Pay {formatPrice(Number(course.price))}
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPayCourse(course);
+                          setPayError('');
+                        }}
                         className="inline-flex items-center gap-2 bg-sky-500 hover:bg-sky-400 text-white font-bold px-4 py-2 rounded-full text-sm transition-all"
                       >
                         <i className="ri-telegram-line text-lg" />
-                        Telegram
-                      </a>
-                    ) : null}
-                    {!course.youtube_url && !course.telegram_url ? (
-                      <span className="text-white/40 text-sm">Link coming soon</span>
-                    ) : null}
+                        Join class
+                      </button>
+                    )}
                   </div>
                 </div>
                 </div>
@@ -229,6 +265,63 @@ export default function AcademiaPage() {
           </Link>
         </motion.div>
       </div>
+
+      {payCourse ? (
+        <div className="fixed inset-0 z-50 bg-black/70 flex items-end sm:items-center justify-center p-4">
+          <form onSubmit={startPayment} className="w-full max-w-md bg-zinc-950 border border-white/10 rounded-2xl p-6 text-left">
+            <div className="flex items-start justify-between gap-4 mb-4">
+              <div>
+                <p className="text-amber-400 text-xs font-bold tracking-widest uppercase">Online class</p>
+                <h2 className="font-serif text-2xl text-white mt-1">{payCourse.title}</h2>
+                <p className="text-white/60 text-sm mt-1">
+                  {Number(payCourse.price) > 0
+                    ? `Pay ${formatPrice(Number(payCourse.price))}, then we will open the Telegram class.`
+                    : 'Enter your details and we will open the class.'}
+                </p>
+              </div>
+              <button type="button" onClick={() => setPayCourse(null)} className="text-white/50 hover:text-white" aria-label="Close">
+                <i className="ri-close-line text-2xl" />
+              </button>
+            </div>
+            <div className="space-y-3">
+              <input
+                required
+                value={payForm.name}
+                onChange={(e) => setPayForm({ ...payForm, name: e.target.value })}
+                placeholder="Your name"
+                className="w-full bg-white/10 border border-white/20 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-amber-500"
+              />
+              <input
+                required
+                type="email"
+                value={payForm.email}
+                onChange={(e) => setPayForm({ ...payForm, email: e.target.value })}
+                placeholder="Email address"
+                className="w-full bg-white/10 border border-white/20 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-amber-500"
+              />
+              <input
+                required
+                value={payForm.phone}
+                onChange={(e) => setPayForm({ ...payForm, phone: e.target.value })}
+                placeholder="Mobile money number"
+                className="w-full bg-white/10 border border-white/20 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-amber-500"
+              />
+            </div>
+            {payError ? <p className="text-red-400 text-sm mt-3">{payError}</p> : null}
+            <button
+              type="submit"
+              disabled={payingId === payCourse.id}
+              className="mt-5 w-full bg-amber-500 hover:bg-amber-400 disabled:opacity-60 text-black font-bold py-3 rounded-full"
+            >
+              {payingId === payCourse.id
+                ? 'Opening payment…'
+                : Number(payCourse.price) > 0
+                  ? `Pay ${formatPrice(Number(payCourse.price))}`
+                  : 'Continue'}
+            </button>
+          </form>
+        </div>
+      ) : null}
     </main>
   );
 }
