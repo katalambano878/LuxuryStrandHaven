@@ -3,7 +3,6 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabase';
-import CourseCheckout from '@/components/academia/CourseCheckout';
 import { useCMS } from '@/context/CMSContext';
 
 type Course = {
@@ -25,7 +24,6 @@ export default function AcademiaPage() {
   const [coursesLoading, setCoursesLoading] = useState(true);
   const [email, setEmail] = useState('');
   const [submitted, setSubmitted] = useState(false);
-  const [payCourse, setPayCourse] = useState<Course | null>(null);
   const { getSetting } = useCMS();
   const intro = getSetting('academia_intro') || "Ghana's premier online hair education platform. Learn wig making, HD lace, hair business and more — from industry experts.";
 
@@ -79,61 +77,47 @@ export default function AcademiaPage() {
           </div>
 
           {coursesLoading ? (
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
-              {[0, 1, 2, 3].map((item) => (
-                <div key={item} className="animate-pulse">
-                  <div className="bg-gray-200 aspect-[3/4] mb-4" />
-                  <div className="h-4 bg-gray-200 w-3/4 mb-2" />
-                  <div className="h-4 bg-gray-200 w-1/2" />
-                </div>
+            <div className="grid lg:grid-cols-2 gap-6">
+              {[0, 1].map((item) => (
+                <div key={item} className="h-56 bg-white border border-gray-200 animate-pulse" />
               ))}
             </div>
           ) : courses.length === 0 ? (
             <p className="text-gray-500 font-light">Classes will appear here once they are published.</p>
           ) : (
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6 lg:gap-8">
+            <div className="grid lg:grid-cols-2 gap-6">
               {courses.map((course) => {
                 const price = Number(course.price) || 0;
                 return (
-                  <article key={course.id} className="group bg-white h-full flex flex-col">
-                    <Link href={`/academia/course/${course.id}`} className="relative block aspect-[3/4] overflow-hidden bg-gray-100">
+                  <article key={course.id} className="flex flex-col sm:flex-row bg-white border border-gray-200 overflow-hidden">
+                    <Link
+                      href={`/academia/course/${course.id}`}
+                      className="relative sm:w-[42%] aspect-[16/10] sm:aspect-auto sm:min-h-[220px] bg-gray-100 shrink-0"
+                    >
                       {course.thumbnail_url ? (
-                        <img
-                          src={course.thumbnail_url}
-                          alt=""
-                          className="w-full h-full object-cover object-top transition-transform duration-500 group-hover:scale-[1.02]"
-                        />
+                        <img src={course.thumbnail_url} alt="" className="absolute inset-0 w-full h-full object-cover" />
                       ) : (
-                        <div className="w-full h-full flex items-center justify-center text-5xl">{course.icon || '📚'}</div>
+                        <span className="absolute inset-0 flex items-center justify-center text-4xl">{course.icon || '📚'}</span>
                       )}
-                      <span className="absolute top-3 left-3 bg-white/90 text-gray-900 text-[10px] uppercase tracking-wider font-semibold px-2.5 py-1">
-                        Class
-                      </span>
                     </Link>
-                    <div className="flex flex-col flex-grow pt-4 pb-2 text-left">
-                      <Link href={`/academia/course/${course.id}`}>
-                        <h3 className="font-serif text-[1.05rem] leading-snug text-black font-medium line-clamp-2 group-hover:underline">
+                    <div className="flex flex-1 flex-col p-5 sm:p-6">
+                      <span className="text-gray-500 font-bold tracking-widest uppercase text-[11px]">Online class</span>
+                      <h3 className="font-serif text-2xl text-gray-900 leading-tight mt-2">
+                        <Link href={`/academia/course/${course.id}`} className="hover:underline">
                           {course.title}
-                        </h3>
-                      </Link>
-                      <p className="text-sm text-gray-500 font-light mt-2 line-clamp-2">
-                        {course.description || 'Open the class to read the details.'}
+                        </Link>
+                      </h3>
+                      <p className="text-gray-600 text-sm font-light leading-relaxed mt-3 line-clamp-3">
+                        {course.description || 'Open the class page to read what is included.'}
                       </p>
-                      <p className="font-sans text-xl font-bold text-black mt-3 mb-3">{formatPrice(price)}</p>
-                      <div className="mt-auto grid grid-cols-1 gap-2">
+                      <div className="mt-auto pt-5 flex items-center justify-between gap-4">
+                        <p className="text-lg font-bold text-gray-900">{formatPrice(price)}</p>
                         <Link
                           href={`/academia/course/${course.id}`}
-                          className="w-full border border-black py-3 px-4 text-center text-black font-medium text-sm hover:bg-black hover:text-white transition-colors"
+                          className="bg-gray-900 text-white px-5 py-2.5 text-sm font-semibold hover:bg-gray-800"
                         >
-                          View class
+                          {price > 0 ? 'Enroll' : 'Join class'}
                         </Link>
-                        <button
-                          type="button"
-                          onClick={() => setPayCourse(course)}
-                          className="w-full bg-gray-900 py-3 px-4 text-center text-white font-medium text-sm hover:bg-gray-800 transition-colors"
-                        >
-                          {price > 0 ? 'Pay now' : 'Join'}
-                        </button>
                       </div>
                     </div>
                   </article>
@@ -165,8 +149,6 @@ export default function AcademiaPage() {
           </div>
         </div>
       </section>
-
-      {payCourse ? <CourseCheckout course={payCourse} onClose={() => setPayCourse(null)} /> : null}
     </main>
   );
 }
