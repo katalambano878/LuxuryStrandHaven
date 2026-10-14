@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabase';
 import CourseCheckout from '@/components/academia/CourseCheckout';
@@ -16,7 +16,8 @@ type Course = {
 };
 
 function formatPrice(price: number) {
-  return price > 0 ? `GH₵ ${Number(price).toFixed(2)}` : 'Free';
+  if (!price || price <= 0) return 'Free';
+  return `GH₵${Number(price).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
 export default function AcademiaPage() {
@@ -56,117 +57,112 @@ export default function AcademiaPage() {
   }
 
   return (
-    <main className="min-h-screen bg-[#0c0a09] text-white">
-      <section className="relative overflow-hidden border-b border-white/10">
-        <div aria-hidden className="pointer-events-none absolute inset-0">
-          <div className="absolute -top-32 left-1/2 h-72 w-[40rem] -translate-x-1/2 rounded-full bg-amber-500/10 blur-3xl" />
-        </div>
-        <div className="relative max-w-6xl mx-auto px-4 sm:px-6 pt-14 pb-12 sm:pt-20 sm:pb-16">
-          <p className="text-amber-300 text-[11px] font-semibold tracking-[0.28em] uppercase">Luxury Strand Haven</p>
-          <h1 className="font-serif text-5xl sm:text-6xl lg:text-7xl mt-4 leading-[0.95]">
-            Hair <span className="text-amber-300">Academia</span>
-          </h1>
-          <p className="mt-6 max-w-2xl text-base sm:text-lg leading-relaxed text-white/70 whitespace-pre-line">
-            {intro}
-          </p>
+    <main className="min-h-screen bg-white">
+      <section className="py-16 md:py-24 bg-white">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6">
+          <span className="text-gray-500 font-bold tracking-widest uppercase text-xs mb-3 block">Online classes</span>
+          <h1 className="font-serif text-4xl md:text-5xl lg:text-6xl text-gray-900 mb-4">Hair Academia</h1>
+          <p className="text-gray-600 text-lg max-w-2xl font-light whitespace-pre-line">{intro}</p>
         </div>
       </section>
 
-      <section className="max-w-6xl mx-auto px-4 sm:px-6 py-12 sm:py-16">
-        <div className="flex items-end justify-between gap-4 mb-8">
-          <div>
-            <p className="text-amber-300/80 text-[11px] font-semibold tracking-[0.22em] uppercase">Classes</p>
-            <h2 className="font-serif text-3xl sm:text-4xl mt-2">Online courses</h2>
+      <section className="pb-24 bg-stone-50">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-16">
+          <div className="flex items-end justify-between mb-12">
+            <div>
+              <span className="text-gray-500 font-bold tracking-widest uppercase text-xs mb-3 block">Classes</span>
+              <h2 className="font-serif text-4xl md:text-5xl text-gray-900">Online courses</h2>
+            </div>
+            {!coursesLoading && (
+              <p className="text-sm text-gray-500">{courses.length} {courses.length === 1 ? 'class' : 'classes'}</p>
+            )}
           </div>
-          <p className="hidden sm:block text-sm text-white/45">{courses.length} {courses.length === 1 ? 'class' : 'classes'}</p>
-        </div>
 
-        {coursesLoading ? (
-          <div className="grid sm:grid-cols-2 gap-6">
-            {[0, 1].map((item) => (
-              <div key={item} className="h-[28rem] rounded-3xl bg-white/5 animate-pulse" />
-            ))}
-          </div>
-        ) : courses.length === 0 ? (
-          <div className="rounded-3xl border border-white/10 bg-white/5 px-6 py-16 text-center text-white/60">
-            Classes will appear here once they are published.
-          </div>
-        ) : (
-          <div className="grid sm:grid-cols-2 gap-6 lg:gap-8">
-            {courses.map((course) => {
-              const price = Number(course.price) || 0;
-              return (
-                <article key={course.id} className="group flex flex-col overflow-hidden rounded-3xl border border-white/10 bg-[#161311] shadow-[0_20px_60px_rgba(0,0,0,0.35)]">
-                  <Link href={`/academia/course/${course.id}`} className="relative block aspect-[4/3] overflow-hidden bg-[#221c16]">
-                    {course.thumbnail_url ? (
-                      <img
-                        src={course.thumbnail_url}
-                        alt=""
-                        className="h-full w-full object-cover transition duration-700 group-hover:scale-[1.03]"
-                      />
-                    ) : (
-                      <div className="flex h-full items-center justify-center text-6xl">{course.icon || '📚'}</div>
-                    )}
-                    <div className="absolute inset-0 bg-gradient-to-t from-[#161311] via-transparent to-black/10" />
-                    <span className="absolute left-4 top-4 rounded-full bg-black/70 px-3 py-1 text-[11px] font-semibold tracking-wide text-amber-200 backdrop-blur">
-                      Online class
-                    </span>
-                    <span className="absolute right-4 top-4 rounded-full bg-amber-400 px-3 py-1 text-sm font-bold text-black">
-                      {formatPrice(price)}
-                    </span>
-                  </Link>
-
-                  <div className="flex flex-1 flex-col px-5 pb-5 pt-4 sm:px-6 sm:pb-6">
-                    <h3 className="font-serif text-2xl sm:text-[1.7rem] leading-tight text-white">
-                      <Link href={`/academia/course/${course.id}`} className="hover:text-amber-200">
-                        {course.title}
-                      </Link>
-                    </h3>
-                    <p className="mt-3 line-clamp-3 text-sm leading-relaxed text-white/60">
-                      {course.description || 'Open the class page to see what you will learn.'}
-                    </p>
-                    <div className="mt-6 flex items-center gap-3">
-                      <Link
-                        href={`/academia/course/${course.id}`}
-                        className="inline-flex flex-1 items-center justify-center rounded-full bg-white px-5 py-3 text-sm font-semibold text-black transition hover:bg-amber-200"
-                      >
-                        View class
-                      </Link>
-                      <button
-                        type="button"
-                        onClick={() => setPayCourse(course)}
-                        className="inline-flex items-center justify-center rounded-full border border-white/15 px-5 py-3 text-sm font-semibold text-white transition hover:border-amber-300 hover:text-amber-200"
-                      >
-                        {price > 0 ? 'Pay now' : 'Join'}
-                      </button>
-                    </div>
-                  </div>
-                </article>
-              );
-            })}
-          </div>
-        )}
-
-        <div className="mt-16 max-w-xl">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-white/40">New classes</p>
-          <h3 className="font-serif text-2xl mt-2">Get a note when the next class opens</h3>
-          {submitted ? (
-            <p className="mt-4 text-amber-200">You are on the list.</p>
+          {coursesLoading ? (
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
+              {[0, 1, 2, 3].map((item) => (
+                <div key={item} className="animate-pulse">
+                  <div className="bg-gray-200 aspect-[3/4] mb-4" />
+                  <div className="h-4 bg-gray-200 w-3/4 mb-2" />
+                  <div className="h-4 bg-gray-200 w-1/2" />
+                </div>
+              ))}
+            </div>
+          ) : courses.length === 0 ? (
+            <p className="text-gray-500 font-light">Classes will appear here once they are published.</p>
           ) : (
-            <form onSubmit={handleNotify} className="mt-4 flex flex-col sm:flex-row gap-2">
-              <input
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="Email address"
-                required
-                className="flex-1 rounded-full border border-white/15 bg-white/5 px-5 py-3 text-sm outline-none focus:border-amber-400"
-              />
-              <button type="submit" className="rounded-full bg-amber-400 px-6 py-3 text-sm font-bold text-black">
-                Notify me
-              </button>
-            </form>
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6 lg:gap-8">
+              {courses.map((course) => {
+                const price = Number(course.price) || 0;
+                return (
+                  <article key={course.id} className="group bg-white h-full flex flex-col">
+                    <Link href={`/academia/course/${course.id}`} className="relative block aspect-[3/4] overflow-hidden bg-gray-100">
+                      {course.thumbnail_url ? (
+                        <img
+                          src={course.thumbnail_url}
+                          alt=""
+                          className="w-full h-full object-cover object-top transition-transform duration-500 group-hover:scale-[1.02]"
+                        />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center text-5xl">{course.icon || '📚'}</div>
+                      )}
+                      <span className="absolute top-3 left-3 bg-white/90 text-gray-900 text-[10px] uppercase tracking-wider font-semibold px-2.5 py-1">
+                        Class
+                      </span>
+                    </Link>
+                    <div className="flex flex-col flex-grow pt-4 pb-2 text-left">
+                      <Link href={`/academia/course/${course.id}`}>
+                        <h3 className="font-serif text-[1.05rem] leading-snug text-black font-medium line-clamp-2 group-hover:underline">
+                          {course.title}
+                        </h3>
+                      </Link>
+                      <p className="text-sm text-gray-500 font-light mt-2 line-clamp-2">
+                        {course.description || 'Open the class to read the details.'}
+                      </p>
+                      <p className="font-sans text-xl font-bold text-black mt-3 mb-3">{formatPrice(price)}</p>
+                      <div className="mt-auto grid grid-cols-1 gap-2">
+                        <Link
+                          href={`/academia/course/${course.id}`}
+                          className="w-full border border-black py-3 px-4 text-center text-black font-medium text-sm hover:bg-black hover:text-white transition-colors"
+                        >
+                          View class
+                        </Link>
+                        <button
+                          type="button"
+                          onClick={() => setPayCourse(course)}
+                          className="w-full bg-gray-900 py-3 px-4 text-center text-white font-medium text-sm hover:bg-gray-800 transition-colors"
+                        >
+                          {price > 0 ? 'Pay now' : 'Join'}
+                        </button>
+                      </div>
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
           )}
+
+          <div className="mt-20 max-w-xl">
+            <span className="text-gray-500 font-bold tracking-widest uppercase text-xs mb-3 block">Updates</span>
+            <h3 className="font-serif text-3xl text-gray-900 mb-3">Hear about the next class</h3>
+            {submitted ? (
+              <p className="text-gray-600 font-light">You are on the list.</p>
+            ) : (
+              <form onSubmit={handleNotify} className="flex flex-col sm:flex-row gap-2">
+                <input
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="Email address"
+                  required
+                  className="flex-1 border border-gray-300 px-4 py-3 text-sm focus:outline-none focus:border-gray-900"
+                />
+                <button type="submit" className="bg-gray-900 text-white px-6 py-3 text-sm font-semibold hover:bg-gray-800">
+                  Notify me
+                </button>
+              </form>
+            )}
+          </div>
         </div>
       </section>
 

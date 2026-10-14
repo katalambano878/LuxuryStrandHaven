@@ -50,26 +50,26 @@ function JoinClass() {
   }, [order]);
 
   return (
-    <main className="min-h-screen bg-black text-white flex items-center justify-center px-6">
+    <main className="min-h-screen bg-white flex items-center justify-center px-6">
       <div className="max-w-md text-center">
         {!failed ? (
-          <i className="ri-loader-4-line text-4xl text-amber-400 animate-spin mb-4 block" />
+          <i className="ri-loader-4-line text-4xl text-gray-900 animate-spin mb-4 block" />
         ) : (
-          <i className="ri-error-warning-line text-4xl text-red-400 mb-4 block" />
+          <i className="ri-error-warning-line text-4xl text-red-500 mb-4 block" />
         )}
-        <h1 className="font-serif text-3xl mb-3">{failed ? 'Payment not completed' : 'You are in'}</h1>
-        <p className="text-white/70 mb-8">{message}</p>
+        <h1 className="font-serif text-3xl text-gray-900 mb-3">{failed ? 'Payment not completed' : 'You are in'}</h1>
+        <p className="text-gray-600 font-light mb-8">{message}</p>
         {classUrl ? (
           <a
             href={classUrl}
-            className="inline-flex items-center gap-2 bg-sky-500 hover:bg-sky-400 text-white font-bold px-6 py-3 rounded-full"
+            className="inline-flex items-center gap-2 bg-gray-900 hover:bg-gray-800 text-white font-semibold px-6 py-3"
           >
             <i className="ri-telegram-line text-lg" />
             Open the class on Telegram
           </a>
         ) : null}
         <div className="mt-6">
-          <Link href="/academia" className="text-sm text-white/50 hover:text-white">
+          <Link href="/academia" className="text-sm text-gray-500 hover:text-gray-900">
             Back to Academia
           </Link>
         </div>
@@ -80,7 +80,7 @@ function JoinClass() {
 
 export default function AcademiaJoinPage() {
   return (
-    <Suspense fallback={<main className="min-h-screen bg-black" />}>
+    <Suspense fallback={<main className="min-h-screen bg-white" />}>
       <JoinClass />
     </Suspense>
   );
