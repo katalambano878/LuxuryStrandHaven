@@ -229,6 +229,11 @@ export default function AdminLayout({
       icon: 'ri-message-2-line',
       path: '/admin/test-sms'
     },
+    {
+      title: 'Buy SMS',
+      icon: 'ri-bank-card-line',
+      path: '/admin/sms-credit'
+    },
 
     {
       title: 'Academia',
