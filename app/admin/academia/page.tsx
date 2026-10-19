@@ -14,6 +14,8 @@ export default function AdminAcademiaPage() {
   const [intro, setIntro] = useState('');
   const [introSaving, setIntroSaving] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [shareId, setShareId] = useState<string | null>(null);
+  const [showModal, setShowModal] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState({
     title: '',
