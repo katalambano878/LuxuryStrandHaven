@@ -3,7 +3,7 @@
 import { verifyAdminToken } from '@/lib/auth';
 import { sendSMS } from '@/lib/notifications';
 
-/** Sends a test SMS through the same path real notifications use (Taysend, then Moolre). */
+/** Sends a test SMS through the same Moolre path real notifications use. */
 export async function testSmsAction(phone: string, message: string, accessToken: string) {
     // Server actions are public endpoints; check the caller here, not just in middleware.
     if (!(await verifyAdminToken(accessToken))) {
@@ -17,11 +17,10 @@ export async function testSmsAction(phone: string, message: string, accessToken:
     try {
         const result: any = await sendSMS({ to, message: text });
         if (!result) {
-            return { success: false, error: 'No SMS provider is configured (set TAYSEND or MOOLRE_SMS_API_KEY).' };
+            return { success: false, error: 'SMS is not configured (set MOOLRE_SMS_API_KEY).' };
         }
         return {
             success: result.status === 1,
-            provider: result.provider || 'moolre',
             result,
         };
     } catch (error: any) {
