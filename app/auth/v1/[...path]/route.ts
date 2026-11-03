@@ -7,8 +7,12 @@ import {
   getUserById,
   updateUserPassword,
   updateUserMetadata,
+  createPasswordResetToken,
+  revokeSessions,
 } from "@/lib/db/auth";
 import { isPlainPostgres } from "@/lib/db/mode";
+import { checkRateLimit, getClientIdentifier, RATE_LIMITS } from "@/lib/rate-limit";
+import { emailLayout, sendEmail } from "@/lib/notifications";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -100,6 +104,8 @@ export async function POST(
     body = Object.fromEntries(new URLSearchParams(text));
   }
 
+  const ip = getClientIdentifier(req);
+
   // /auth/v1/token?grant_type=password|refresh_token
   if (slug === "token") {
     const grant =
@@ -109,6 +115,11 @@ export async function POST(
 
     if (grant === "password") {
       const email = String(body.email || "");
+      const byIp = checkRateLimit(`login:${ip}`, RATE_LIMITS.auth);
+      const byEmail = checkRateLimit(`login-email:${email.trim().toLowerCase()}`, RATE_LIMITS.auth);
+      if (!byIp.success || !byEmail.success) {
+        return gotrueError("Too many sign-in attempts. Please wait a minute and try again.", 429, "over_request_rate_limit");
+      }
       const password = String(body.password || "");
       const { session, error } = await signInWithPassword(email, password);
       if (error || !session) {
@@ -130,6 +141,9 @@ export async function POST(
   }
 
   if (slug === "signup") {
+    if (!checkRateLimit(`signup:${ip}`, RATE_LIMITS.auth).success) {
+      return gotrueError("Too many attempts. Please wait a minute and try again.", 429, "over_request_rate_limit");
+    }
     const { session, error } = await signUpWithPassword({
       email: String(body.email || ""),
       password: String(body.password || ""),
@@ -142,11 +156,40 @@ export async function POST(
   }
 
   if (slug === "logout") {
-    return NextResponse.json({}, { status: 204, headers: cors() });
+    // Signing out ends every session for the account (supabase-js "global" scope).
+    const token = (req.headers.get("authorization") || "").replace(/^Bearer\s+/i, "").trim();
+    const verified = token ? await verifyAccessToken(token) : null;
+    if (verified) await revokeSessions(verified.userId);
+    return new NextResponse(null, { status: 204, headers: cors() });
   }
 
   if (slug === "recover") {
-    // Password recovery email not wired in staging shim yet
+    if (!checkRateLimit(`recover:${ip}`, RATE_LIMITS.passwordReset).success) {
+      return gotrueError("Too many reset requests. Please try again later.", 429, "over_email_send_rate_limit");
+    }
+    const email = String(body.email || "").trim().toLowerCase();
+    // Same answer whether or not the account exists.
+    try {
+      const token = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
+        ? await createPasswordResetToken(email)
+        : null;
+      if (token) {
+        const base = (process.env.NEXT_PUBLIC_APP_URL || url.origin).replace(/\/+$/, "");
+        const link = `${base}/auth/reset-password?token=${token}`;
+        await sendEmail({
+          to: email,
+          subject: "Reset your password",
+          html: emailLayout(`
+<h2 style="margin:0 0 12px;color:#111827;font-size:22px;text-align:center;">Reset your password</h2>
+<p style="color:#374151;font-size:14px;line-height:1.7;margin:16px 0;">We got a request to reset the password for this email. The link below works for one hour.</p>
+<p style="text-align:center;margin:24px 0;"><a href="${link}" style="display:inline-block;background:#111827;color:#ffffff;padding:14px 32px;border-radius:8px;text-decoration:none;font-weight:600;">Choose a new password</a></p>
+<p style="color:#6b7280;font-size:12px;line-height:1.6;margin:16px 0 0;">If you did not ask for this, you can ignore this email. Your password stays the same.</p>
+`, "Reset your password"),
+        });
+      }
+    } catch (err) {
+      console.error("[auth] recover failed:", err instanceof Error ? err.message : err);
+    }
     return NextResponse.json({}, { status: 200, headers: cors() });
   }
 

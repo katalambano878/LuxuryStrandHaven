@@ -3,8 +3,6 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
-import Header from '@/components/Header';
-import Footer from '@/components/Footer';
 import { sanitizeHtml } from '@/lib/sanitize';
 import { useCMS } from '@/context/CMSContext';
 import { getArticles, relatedArticles } from './help-articles-data';
@@ -28,7 +26,6 @@ export default function ArticlePage() {
 
   return (
     <>
-      <Header />
       <main className="min-h-screen bg-gray-50 py-12">
         <div className="max-w-4xl mx-auto px-4">
           <Link
@@ -150,7 +147,6 @@ export default function ArticlePage() {
           </div>
         </div>
       </main>
-      <Footer />
     </>
   );
 }

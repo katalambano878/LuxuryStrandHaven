@@ -15,6 +15,18 @@ export default function ProductsPage() {
   const [products, setProducts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [categories, setCategories] = useState<any[]>([]);
+  const [categoryFilter, setCategoryFilter] = useState('');
+  const [statusFilter, setStatusFilter] = useState('');
+  const [stockFilter, setStockFilter] = useState('');
+
+  // The dashboard links here with ?filter=low-stock
+  useEffect(() => {
+    const f = new URLSearchParams(window.location.search).get('filter');
+    if (f === 'low-stock' || f === 'out-of-stock') {
+      setStockFilter(f);
+      setShowFilters(true);
+    }
+  }, []);
 
   // Statistics
   const [stats, setStats] = useState({
@@ -114,10 +126,12 @@ export default function ProductsPage() {
   }, [fetchProducts, fetchCategories]);
 
   const handleSelectAll = () => {
-    if (selectedProducts.length === products.length) {
+    // Only what is visible after search and filters can be selected.
+    const visibleIds = filteredProducts.map(p => p.id);
+    if (visibleIds.length > 0 && visibleIds.every(id => selectedProducts.includes(id))) {
       setSelectedProducts([]);
     } else {
-      setSelectedProducts(products.map(p => p.id));
+      setSelectedProducts(visibleIds);
     }
   };
 
@@ -129,36 +143,76 @@ export default function ProductsPage() {
     }
   };
 
-  const handleDeleteProduct = async (productId: string) => {
-    if (confirm('Are you sure you want to delete this product?')) {
-      const { error } = await supabase.from('products').delete().eq('id', productId);
-      if (!error) {
-        setProducts(products.filter(p => p.id !== productId));
-        alert('Product deleted successfully');
-      } else {
-        alert('Error deleting product');
+  /**
+   * Products that appear in past orders can't be deleted (the orders point at
+   * them), so those are archived instead: hidden from the shop, kept for history.
+   */
+  const deleteOrArchive = async (ids: string[]) => {
+    const { data: ordered, error: orderedErr } = await supabase
+      .from('order_items')
+      .select('product_id')
+      .in('product_id', ids);
+    if (orderedErr) throw orderedErr;
+    const orderedIds = Array.from(new Set((ordered || []).map((r: any) => r.product_id)));
+    const deletable = ids.filter(id => !orderedIds.includes(id));
+
+    if (orderedIds.length > 0) {
+      const { error } = await supabase.from('products').update({ status: 'archived' }).in('id', orderedIds);
+      if (error) throw error;
+    }
+    if (deletable.length > 0) {
+      for (const table of ['product_images', 'product_variants', 'product_category_links', 'reviews', 'cart_items', 'wishlist_items']) {
+        const { error } = await supabase.from(table).delete().in('product_id', deletable);
+        if (error) throw new Error(`Could not remove ${table.replace(/_/g, ' ')}: ${error.message}`);
       }
+      const { error } = await supabase.from('products').delete().in('id', deletable);
+      if (error) throw error;
+    }
+    return { deleted: deletable, archived: orderedIds };
+  };
+
+  const reportDeleteResult = ({ deleted, archived }: { deleted: string[]; archived: string[] }) => {
+    const parts = [];
+    if (deleted.length) parts.push(`${deleted.length} deleted`);
+    if (archived.length) parts.push(`${archived.length} archived instead, because past orders include them`);
+    alert(parts.join('; ') + '.');
+  };
+
+  const handleDeleteProduct = async (productId: string) => {
+    if (!confirm('Are you sure you want to delete this product?')) return;
+    try {
+      const result = await deleteOrArchive([productId]);
+      reportDeleteResult(result);
+      fetchProducts();
+    } catch (err: any) {
+      alert('Error deleting product: ' + (err?.message || 'unknown error'));
     }
   };
 
   const handleBulkDelete = async () => {
-    if (confirm(`Are you sure you want to delete ${selectedProducts.length} products?`)) {
-      const { error } = await supabase.from('products').delete().in('id', selectedProducts);
-      if (!error) {
-        setProducts(products.filter(p => !selectedProducts.includes(p.id)));
-        setSelectedProducts([]);
-        alert('Products deleted successfully');
-      } else {
-        alert('Error deleting products');
-      }
+    if (!confirm(`Are you sure you want to delete ${selectedProducts.length} products?`)) return;
+    try {
+      const result = await deleteOrArchive(selectedProducts);
+      setSelectedProducts([]);
+      reportDeleteResult(result);
+      fetchProducts();
+    } catch (err: any) {
+      alert('Error deleting products: ' + (err?.message || 'unknown error'));
     }
   };
 
   const filteredProducts = products.filter(product => {
     const term = searchQuery.toLowerCase();
-    return product.name.toLowerCase().includes(term) ||
+    const matchesSearch = product.name.toLowerCase().includes(term) ||
       (product.sku && product.sku.toLowerCase().includes(term)) ||
       (product.category && product.category.toLowerCase().includes(term));
+    if (!matchesSearch) return false;
+    if (categoryFilter && product.category !== categoryFilter) return false;
+    if (statusFilter && product.status !== statusFilter) return false;
+    const threshold = product.metadata?.low_stock_threshold || 5;
+    if (stockFilter === 'low-stock' && !(product.quantity > 0 && product.quantity < threshold)) return false;
+    if (stockFilter === 'out-of-stock' && product.quantity !== 0) return false;
+    return true;
   });
 
   return (
@@ -252,15 +306,35 @@ export default function ProductsPage() {
 
           {showFilters && (
             <div className="mt-4 p-4 bg-gray-50 rounded-lg grid md:grid-cols-4 gap-4">
-              <select className="px-3 py-2 pr-8 border-2 border-gray-300 rounded-lg text-sm cursor-pointer">
+              <select
+                aria-label="Filter by category"
+                value={categoryFilter}
+                onChange={(e) => setCategoryFilter(e.target.value)}
+                className="px-3 py-2 pr-8 border-2 border-gray-300 rounded-lg text-sm cursor-pointer"
+              >
                 <option value="">All Categories</option>
                 {categories.map((cat: any) => <option key={cat.name} value={cat.name}>{cat.name}</option>)}
               </select>
-              <select className="px-3 py-2 pr-8 border-2 border-gray-300 rounded-lg text-sm cursor-pointer">
-                <option>All Status</option>
-                <option>Active</option>
-                <option>Draft</option>
-                <option>Archived</option>
+              <select
+                aria-label="Filter by status"
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value)}
+                className="px-3 py-2 pr-8 border-2 border-gray-300 rounded-lg text-sm cursor-pointer"
+              >
+                <option value="">All Status</option>
+                <option value="active">Active</option>
+                <option value="draft">Draft</option>
+                <option value="archived">Archived</option>
+              </select>
+              <select
+                aria-label="Filter by stock"
+                value={stockFilter}
+                onChange={(e) => setStockFilter(e.target.value)}
+                className="px-3 py-2 pr-8 border-2 border-gray-300 rounded-lg text-sm cursor-pointer"
+              >
+                <option value="">All Stock</option>
+                <option value="low-stock">Low stock</option>
+                <option value="out-of-stock">Out of stock</option>
               </select>
             </div>
           )}
@@ -301,7 +375,7 @@ export default function ProductsPage() {
                   <th className="py-4 px-6">
                     <input
                       type="checkbox"
-                      checked={selectedProducts.length === products.length && products.length > 0}
+                      checked={filteredProducts.length > 0 && filteredProducts.every(p => selectedProducts.includes(p.id))}
                       onChange={handleSelectAll}
                       className="w-4 h-4 text-gray-900 border-gray-300 rounded focus:ring-gray-600 cursor-pointer"
                     />

@@ -8,6 +8,7 @@ export default function AdminReviewsPage() {
   const [selectedReviews, setSelectedReviews] = useState<string[]>([]);
   const [reviews, setReviews] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
 
   const fetchReviews = useCallback(async () => {
     try {
@@ -16,33 +17,37 @@ export default function AdminReviewsPage() {
         .from('reviews')
         .select(`
           *,
-          profiles:user_id (full_name, email),
           products:product_id (name, product_images (url))
         `)
         .order('created_at', { ascending: false });
 
       if (error) {
-        // Graceful fallback if table doesn't exist or permissions fail
-        console.warn('Error fetching reviews:', error);
-        // setReviews([]); // Keep empty
+        setLoadError(error.message);
       } else if (data) {
+        setLoadError('');
+        // reviews.user_id points at auth.users, so reviewer names come from profiles separately.
+        const userIds = Array.from(new Set(data.map((r: any) => r.user_id).filter(Boolean)));
+        const { data: profiles } = userIds.length
+          ? await supabase.from('profiles').select('id, full_name, email').in('id', userIds)
+          : { data: [] as any[] };
+        const byId = new Map((profiles || []).map((p: any) => [p.id, p]));
         const formatted = data.map((r: any) => ({
           id: r.id,
           customer: {
-            name: r.profiles?.full_name || 'Anonymous',
-            email: r.profiles?.email || 'N/A',
-            avatar: getInitials(r.profiles?.full_name || r.profiles?.email)
+            name: byId.get(r.user_id)?.full_name || 'Anonymous',
+            email: byId.get(r.user_id)?.email || 'N/A',
+            avatar: getInitials(byId.get(r.user_id)?.full_name || byId.get(r.user_id)?.email || '')
           },
           product: {
             name: r.products?.name || 'Unknown Product',
-            image: r.products?.product_images?.[0]?.url || 'https://via.placeholder.com/150'
+            image: r.products?.product_images?.[0]?.url || '/placeholder-product.svg'
           },
           rating: r.rating,
           title: r.title,
           comment: r.content,
           date: new Date(r.created_at).toLocaleDateString(),
-          status: r.status || 'Pending',
-          helpful: r.helpful || 0
+          status: r.status || 'pending',
+          helpful: r.helpful_votes || 0
         }));
         setReviews(formatted);
       }
@@ -80,9 +85,9 @@ export default function AdminReviewsPage() {
   };
 
   const statusColors: any = {
-    'Pending': 'bg-amber-100 text-amber-700',
-    'Approved': 'bg-gray-100 text-gray-900',
-    'Rejected': 'bg-red-100 text-red-700'
+    pending: 'bg-amber-100 text-amber-700',
+    approved: 'bg-green-100 text-green-800',
+    rejected: 'bg-red-100 text-red-700'
   };
 
   const handleSelectAll = () => {
@@ -105,8 +110,9 @@ export default function AdminReviewsPage() {
     if (selectedReviews.length === 0) return;
     try {
       let newStatus = '';
-      if (action === 'Approve') newStatus = 'Approved';
-      if (action === 'Reject') newStatus = 'Rejected';
+      // review_status enum values are lowercase
+      if (action === 'Approve') newStatus = 'approved';
+      if (action === 'Reject') newStatus = 'rejected';
 
       if (newStatus) {
         const { error } = await supabase
@@ -120,7 +126,7 @@ export default function AdminReviewsPage() {
       }
     } catch (err) {
       console.error('Error updating reviews', err);
-      alert('Failed to update reviews. Functionality might be limited.');
+      alert('Failed to update reviews: ' + (err instanceof Error ? err.message : 'unknown error'));
     }
   };
 
@@ -285,7 +291,7 @@ export default function AdminReviewsPage() {
                     <td className="py-4 px-4 text-sm text-gray-600 whitespace-nowrap">{review.date}</td>
                     <td className="py-4 px-4">
                       <span className={`px-3 py-1 rounded-full text-xs font-semibold whitespace-nowrap ${statusColors[review.status] || 'bg-gray-100'}`}>
-                        {review.status}
+                        {review.status.charAt(0).toUpperCase() + review.status.slice(1)}
                       </span>
                     </td>
                   </tr>
@@ -296,6 +302,7 @@ export default function AdminReviewsPage() {
         </div>
 
         <div className="p-6 border-t border-gray-200">
+          {loadError && <p className="text-sm text-red-600 mb-2" role="alert">Could not load reviews: {loadError}</p>}
           <p className="text-gray-600 text-sm">Showing {filteredReviews.length} reviews</p>
         </div>
       </div>

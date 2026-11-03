@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase-admin';
-import { sendOrderConfirmation, sendOrderStatusUpdate, sendWelcomeMessage, sendContactMessage, sendPaymentLink, sendEmail, sendSMS, emailLayout } from '@/lib/notifications';
+import { sendOrderConfirmation, sendOrderStatusUpdate, sendWelcomeMessage, sendContactMessage, sendPaymentLink, sendEmail, sendSMS, emailLayout, escapeHtml } from '@/lib/notifications';
 import { checkRateLimit, getClientIdentifier, RATE_LIMITS } from '@/lib/rate-limit';
 
 export async function POST(request: Request) {
@@ -25,19 +25,16 @@ export async function POST(request: Request) {
         const body = await request.json();
         const { type, payload } = body;
 
-        if (!payload) {
+        if (!payload || typeof payload !== 'object') {
             return NextResponse.json({ error: 'Payload required' }, { status: 400 });
         }
 
-        // Authentication requirements based on notification type
-        // 'campaign' requires admin/staff role
-        // 'order_updated', 'order_status' requires admin/staff role (status updates from admin)
-        // 'order_created', 'welcome', 'contact' can be triggered from checkout/forms
-        
-        const requiresAdminAuth = ['campaign', 'order_updated', 'order_status'].includes(type);
+        // Everything that sends to a customer or uses order data needs staff.
+        // Only 'contact' (to the store) and 'welcome' (to the signed-in user) are public.
+        const requiresAdminAuth = ['campaign', 'order_updated', 'order_status', 'order_created', 'payment_link'].includes(type);
+        const authToken = request.headers.get('authorization')?.replace(/^Bearer\s+/i, '').trim();
 
         if (requiresAdminAuth) {
-            const authToken = request.headers.get('authorization')?.replace('Bearer ', '');
             if (!authToken) {
                 return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
             }
@@ -48,7 +45,6 @@ export async function POST(request: Request) {
                 return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
             }
 
-            // Verify admin/staff role (using service role key bypasses RLS)
             const { data: profile, error: profileError } = await supabaseAdmin
                 .from('profiles')
                 .select('role')
@@ -65,8 +61,32 @@ export async function POST(request: Request) {
             }
         }
 
+        if (type === 'welcome') {
+            // Send only to the account that just signed up, never to an address in the body.
+            if (!authToken) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+            const { data: { user } } = await supabaseAdmin.auth.getUser(authToken);
+            if (!user?.email) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+            const createdAt = new Date(user.created_at || 0).getTime();
+            if (!createdAt || Date.now() - createdAt > 15 * 60 * 1000) {
+                return NextResponse.json({ success: true, message: 'Welcome already sent' });
+            }
+            const meta = (user.user_metadata || {}) as Record<string, unknown>;
+            await sendWelcomeMessage({
+                email: user.email,
+                firstName: escapeHtml(String(meta.first_name || meta.full_name || 'there').slice(0, 80)),
+            });
+            return NextResponse.json({ success: true, message: 'Welcome message sent' });
+        }
+
         if (type === 'order_created') {
-            await sendOrderConfirmation(payload);
+            const ref = payload.order_number || payload.id;
+            const { data: dbOrder } = await supabaseAdmin
+                .from('orders')
+                .select('*')
+                .eq(payload.order_number ? 'order_number' : 'id', ref)
+                .maybeSingle();
+            if (!dbOrder) return NextResponse.json({ error: 'Order not found' }, { status: 404 });
+            await sendOrderConfirmation(dbOrder);
             return NextResponse.json({ success: true, message: 'Order confirmation sent' });
         }
 
@@ -105,23 +125,31 @@ export async function POST(request: Request) {
             return NextResponse.json({ success: true, message: 'Status update sent' });
         }
 
-        if (type === 'welcome') {
-            await sendWelcomeMessage(payload);
-            return NextResponse.json({ success: true, message: 'Welcome message sent' });
-        }
-
         if (type === 'contact') {
+            if (!payload.email || !payload.message) {
+                return NextResponse.json({ error: 'Email and message are required' }, { status: 400 });
+            }
             await sendContactMessage(payload);
             return NextResponse.json({ success: true, message: 'Contact message sent' });
         }
 
         if (type === 'payment_link') {
-            await sendPaymentLink(payload);
+            const ref = payload.order_number || payload.id;
+            const { data: dbOrder } = await supabaseAdmin
+                .from('orders')
+                .select('*')
+                .eq(payload.order_number ? 'order_number' : 'id', ref)
+                .maybeSingle();
+            if (!dbOrder) return NextResponse.json({ error: 'Order not found' }, { status: 404 });
+            await sendPaymentLink(dbOrder);
             return NextResponse.json({ success: true, message: 'Payment link sent' });
         }
 
         if (type === 'campaign') {
             const { recipients, subject, message, channels } = payload;
+            if (!Array.isArray(recipients) || typeof message !== 'string' || !channels) {
+                return NextResponse.json({ error: 'Recipients, message and channels are required' }, { status: 400 });
+            }
 
             // Deduplicate phone numbers and emails server-side as safety net
             const seenPhones = new Set<string>();
@@ -177,6 +205,6 @@ export async function POST(request: Request) {
 
     } catch (error: any) {
         console.error('Notification API Error:', error);
-        return NextResponse.json({ error: error.message }, { status: 500 });
+        return NextResponse.json({ error: 'Could not send the notification' }, { status: 500 });
     }
 }

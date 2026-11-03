@@ -18,8 +18,6 @@ export default function CheckoutPage() {
   const [currentStep, setCurrentStep] = useState(1);
   const [isLoading, setIsLoading] = useState(false);
   const [checkoutType, setCheckoutType] = useState<'guest' | 'account'>('guest');
-  const [saveAddress, setSaveAddress] = useState(false);
-  const [savePayment, setSavePayment] = useState(false);
   const [user, setUser] = useState<any>(null);
   const { getToken, verifying } = useRecaptcha();
 
@@ -141,7 +139,7 @@ export default function CheckoutPage() {
   ];
 
   const [deliveryMethod, setDeliveryMethod] = useState('pickup');
-  const [paymentMethod, setPaymentMethod] = useState<'paystack' | 'moolre' | 'stripe' | 'paypal'>('moolre');
+  const [paymentMethod, setPaymentMethod] = useState<'moolre'>('moolre');
   const [errors, setErrors] = useState<any>({});
 
 
@@ -224,142 +222,30 @@ export default function CheckoutPage() {
     }
 
     try {
-      const orderNumber = `ORD-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
-      // Generate tracking number: SLI-XXXXXX (6-char alphanumeric)
-      const trackingId = Array.from({ length: 6 }, () => 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'[Math.floor(Math.random() * 32)]).join('');
-      const trackingNumber = `SLI-${trackingId}`;
-
-      // 1. Create Order
-      const { data: order, error: orderError } = await supabase
-        .from('orders')
-        .insert([{
-          order_number: orderNumber,
-          user_id: user?.id || null, // Capture user_id if logged in
-          email: shippingData.email,
-          phone: shippingData.phone,
-          status: 'pending',
-          payment_status: 'pending',
-          currency: 'GHS',
-          subtotal: subtotal,
-          tax_total: tax,
-          shipping_total: shippingCost,
-          discount_total: 0,
-          total: total,
-          shipping_method: deliveryMethod,
-          payment_method: paymentMethod,
-          shipping_address: shippingData,
-          billing_address: shippingData, // Using same for now
-          metadata: {
-            guest_checkout: !user,
-            first_name: shippingData.firstName,
-            last_name: shippingData.lastName,
-            tracking_number: trackingNumber,
-            payment_method: paymentMethod
-          }
-        }])
-        .select()
-        .single();
-
-      if (orderError) throw orderError;
-
-      // 2. Create Order Items (with UUID validation)
-      // Helper to check if string is a valid UUID
-      const isValidUUID = (str: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str);
-      
-      // Build order items, resolving slugs to UUIDs if needed
-      const orderItems = [];
-      
-      // Batch-fetch product metadata (for preorder_shipping etc.)
-      const productIds = cart.map(item => item.id).filter(id => isValidUUID(id));
-      const { data: productsData } = productIds.length > 0
-        ? await supabase.from('products').select('id, metadata').in('id', productIds)
-        : { data: [] };
-      const productMetaMap = new Map((productsData || []).map((p: any) => [p.id, p.metadata]));
-      
-      for (const item of cart) {
-        let productId = item.id;
-        
-        // If id is not a valid UUID, it might be a slug - try to resolve it
-        if (!isValidUUID(productId)) {
-          const { data: product } = await supabase
-            .from('products')
-            .select('id, metadata')
-            .or(`slug.eq.${productId},id.eq.${productId}`)
-            .single();
-          
-          if (product) {
-            productId = product.id;
-            productMetaMap.set(product.id, product.metadata);
-          } else {
-            throw new Error(`Product not found: ${item.name}. Please remove it from your cart and try again.`);
-          }
-        }
-        
-        const prodMeta = productMetaMap.get(productId);
-        
-        orderItems.push({
-          order_id: order.id,
-          product_id: productId,
-          product_name: item.name,
-          variant_name: item.variant,
-          quantity: item.quantity,
-          unit_price: item.price,
-          total_price: item.price * item.quantity,
-          metadata: {
-            image: item.image,
-            slug: item.slug,
-            preorder_shipping: prodMeta?.preorder_shipping || null
-          }
-        });
-      }
-
-      const { error: itemsError } = await supabase
-        .from('order_items')
-        .insert(orderItems);
-
-      if (itemsError) throw itemsError;
-
-      // Note: Stock reduction happens in mark_order_paid when payment is confirmed
-
-      // 3. Upsert Customer Record (for both guest and registered users)
-      const fullName = `${shippingData.firstName} ${shippingData.lastName}`.trim();
-      await supabase.rpc('upsert_customer_from_order', {
-        p_email: shippingData.email,
-        p_phone: shippingData.phone,
-        p_full_name: fullName,
-        p_first_name: shippingData.firstName,
-        p_last_name: shippingData.lastName,
-        p_user_id: user?.id || null,
-        p_address: shippingData
+      // The server prices the cart from the database and creates the order.
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      const orderRes = await fetch('/api/checkout', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}),
+        },
+        body: JSON.stringify({
+          items: cart.map((item) => ({ id: item.id, quantity: item.quantity, variant: item.variant || null })),
+          shipping: shippingData,
+          deliveryMethod,
+          paymentMethod,
+        }),
       });
+      const orderResult = await orderRes.json().catch(() => ({}));
+      if (!orderRes.ok || !orderResult.success) {
+        throw new Error(orderResult.message || 'Could not place your order');
+      }
+      const orderNumber: string = orderResult.orderNumber;
 
       // 4. Handle Payment Redirects or Completion
-      if (paymentMethod === 'paystack') {
-        try {
-          const paymentRes = await fetch('/api/payment/paystack', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              orderId: orderNumber,
-              amount: total,
-              customerEmail: shippingData.email,
-            }),
-          });
-          const paymentResult = await paymentRes.json();
-          if (!paymentResult.success) {
-            throw new Error(paymentResult.message || 'Payment initialization failed');
-          }
-          clearCart();
-          window.location.href = paymentResult.url;
-          return;
-        } catch (paymentErr: any) {
-          console.error('Payment Error:', paymentErr);
-          alert('Failed to initialize payment: ' + paymentErr.message);
-          setIsLoading(false);
-          return;
-        }
-      }
-
       if (paymentMethod === 'moolre') {
         try {
           const paymentRes = await fetch('/api/payment/moolre', {
@@ -367,7 +253,6 @@ export default function CheckoutPage() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               orderId: orderNumber,
-              amount: total,
               customerEmail: shippingData.email,
             }),
           });
@@ -385,68 +270,6 @@ export default function CheckoutPage() {
           return;
         }
       }
-
-      if (paymentMethod === 'stripe') {
-        try {
-          const paymentRes = await fetch('/api/payment/stripe', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              orderId: orderNumber,
-              amount: total,
-              customerEmail: shippingData.email,
-            }),
-          });
-          const paymentResult = await paymentRes.json();
-          if (!paymentResult.success) {
-            throw new Error(paymentResult.message || 'Payment initialization failed');
-          }
-          clearCart();
-          window.location.href = paymentResult.url;
-          return;
-        } catch (paymentErr: any) {
-          console.error('Payment Error:', paymentErr);
-          alert('Failed to initialize payment: ' + paymentErr.message);
-          setIsLoading(false);
-          return;
-        }
-      }
-
-      if (paymentMethod === 'paypal') {
-        try {
-          const paymentRes = await fetch('/api/payment/paypal', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              orderId: orderNumber,
-              amount: total,
-              customerEmail: shippingData.email,
-            }),
-          });
-          const paymentResult = await paymentRes.json();
-          if (!paymentResult.success) {
-            throw new Error(paymentResult.message || 'Payment initialization failed');
-          }
-          clearCart();
-          window.location.href = paymentResult.url;
-          return;
-        } catch (paymentErr: any) {
-          console.error('Payment Error:', paymentErr);
-          alert('Failed to initialize payment: ' + paymentErr.message);
-          setIsLoading(false);
-          return;
-        }
-      }
-
-      // 5. Send Notifications (For COD or others)
-      fetch('/api/notifications', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          type: 'order_created',
-          payload: order
-        })
-      }).catch(err => console.error('Notification trigger error:', err));
 
       // 6. Clear Cart & Redirect (For COD)
       clearCart();
@@ -514,7 +337,7 @@ export default function CheckoutPage() {
               </button>
 
               <button
-                onClick={() => setCheckoutType('account')}
+                onClick={() => (user ? setCheckoutType('account') : router.push('/auth/login?redirect=/checkout'))}
                 className={`p-6 rounded-xl border-2 transition-all text-left cursor-pointer ${checkoutType === 'account'
                   ? 'border-gray-900 bg-gray-50'
                   : 'border-gray-200 hover:border-gray-300'
@@ -527,7 +350,7 @@ export default function CheckoutPage() {
                     {checkoutType === 'account' && <i className="ri-check-line text-white text-sm"></i>}
                   </div>
                 </div>
-                <h3 className="text-lg font-bold text-gray-900 mb-2">{user ? 'My Account' : 'Create Account'}</h3>
+                <h3 className="text-lg font-bold text-gray-900 mb-2">{user ? 'My Account' : 'Sign in or create an account'}</h3>
                 <p className="text-sm text-gray-600">
                   {user ? `Logged in as ${user.email}` : 'Save info, track orders & earn loyalty points'}
                 </p>
@@ -548,8 +371,8 @@ export default function CheckoutPage() {
                   <div className="space-y-4">
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <div>
-                        <label className="block text-sm font-semibold text-gray-900 mb-2">First Name *</label>
-                        <input
+                        <label htmlFor="checkout-field-1" className="block text-sm font-semibold text-gray-900 mb-2">First Name *</label>
+                        <input id="checkout-field-1"
                           type="text"
                           value={shippingData.firstName}
                           onChange={(e) => setShippingData({ ...shippingData, firstName: e.target.value })}
@@ -559,8 +382,8 @@ export default function CheckoutPage() {
                         {errors.firstName && <p className="text-sm text-red-600 mt-1">{errors.firstName}</p>}
                       </div>
                       <div>
-                        <label className="block text-sm font-semibold text-gray-900 mb-2">Last Name *</label>
-                        <input
+                        <label htmlFor="checkout-field-2" className="block text-sm font-semibold text-gray-900 mb-2">Last Name *</label>
+                        <input id="checkout-field-2"
                           type="text"
                           value={shippingData.lastName}
                           onChange={(e) => setShippingData({ ...shippingData, lastName: e.target.value })}
@@ -572,8 +395,8 @@ export default function CheckoutPage() {
                     </div>
 
                     <div>
-                      <label className="block text-sm font-semibold text-gray-900 mb-2">Email Address *</label>
-                      <input
+                      <label htmlFor="checkout-field-3" className="block text-sm font-semibold text-gray-900 mb-2">Email Address *</label>
+                      <input id="checkout-field-3"
                         type="email"
                         value={shippingData.email}
                         readOnly={!!user}
@@ -585,8 +408,8 @@ export default function CheckoutPage() {
                     </div>
 
                     <div>
-                      <label className="block text-sm font-semibold text-gray-900 mb-2">Phone Number *</label>
-                      <input
+                      <label htmlFor="checkout-field-4" className="block text-sm font-semibold text-gray-900 mb-2">Phone Number *</label>
+                      <input id="checkout-field-4"
                         type="tel"
                         value={shippingData.phone}
                         onChange={(e) => setShippingData({ ...shippingData, phone: e.target.value })}
@@ -598,8 +421,8 @@ export default function CheckoutPage() {
 
                     {/* Country */}
                     <div>
-                      <label className="block text-sm font-semibold text-gray-900 mb-2">Country *</label>
-                      <select
+                      <label htmlFor="checkout-field-5" className="block text-sm font-semibold text-gray-900 mb-2">Country *</label>
+                      <select id="checkout-field-5"
                         value={shippingData.country}
                         onChange={(e) => setShippingData({ ...shippingData, country: e.target.value, region: '', city: '' })}
                         className={`w-full px-4 py-3 border-2 rounded-lg focus:ring-2 focus:ring-gray-600 focus:border-gray-600 bg-white ${errors.country ? 'border-red-500' : 'border-gray-300'}`}
@@ -614,10 +437,10 @@ export default function CheckoutPage() {
 
                     {/* Street Address (optional) */}
                     <div>
-                      <label className="block text-sm font-semibold text-gray-900 mb-2">
+                      <label htmlFor="checkout-field-6" className="block text-sm font-semibold text-gray-900 mb-2">
                         Street Address <span className="text-gray-400 font-normal">(optional)</span>
                       </label>
-                      <input
+                      <input id="checkout-field-6"
                         type="text"
                         value={shippingData.address}
                         onChange={(e) => setShippingData({ ...shippingData, address: e.target.value })}
@@ -631,8 +454,8 @@ export default function CheckoutPage() {
                       <div>
                         {shippingData.country === 'Ghana' ? (
                           <>
-                            <label className="block text-sm font-semibold text-gray-900 mb-2">Region *</label>
-                            <select
+                            <label htmlFor="checkout-field-7" className="block text-sm font-semibold text-gray-900 mb-2">Region *</label>
+                            <select id="checkout-field-7"
                               value={shippingData.region}
                               onChange={(e) => setShippingData({ ...shippingData, region: e.target.value, city: '' })}
                               className={`w-full px-4 py-3 border-2 rounded-lg focus:ring-2 focus:ring-gray-600 focus:border-gray-600 bg-white ${errors.region ? 'border-red-500' : 'border-gray-300'}`}
@@ -646,10 +469,10 @@ export default function CheckoutPage() {
                           </>
                         ) : (
                           <>
-                            <label className="block text-sm font-semibold text-gray-900 mb-2">
+                            <label htmlFor="checkout-field-8" className="block text-sm font-semibold text-gray-900 mb-2">
                               State / Province <span className="text-gray-400 font-normal">(optional)</span>
                             </label>
-                            <input
+                            <input id="checkout-field-8"
                               type="text"
                               value={shippingData.region}
                               onChange={(e) => setShippingData({ ...shippingData, region: e.target.value })}
@@ -662,9 +485,9 @@ export default function CheckoutPage() {
 
                       {/* City — filtered by region for Ghana */}
                       <div>
-                        <label className="block text-sm font-semibold text-gray-900 mb-2">City *</label>
+                        <label htmlFor="checkout-field-9" className="block text-sm font-semibold text-gray-900 mb-2">City *</label>
                         {shippingData.country === 'Ghana' ? (
-                          <select
+                          <select id="checkout-field-9"
                             value={shippingData.city}
                             onChange={(e) => setShippingData({ ...shippingData, city: e.target.value })}
                             disabled={!shippingData.region}
@@ -676,7 +499,7 @@ export default function CheckoutPage() {
                             ))}
                           </select>
                         ) : COUNTRY_CITIES[shippingData.country] ? (
-                          <select
+                          <select id="checkout-field-9"
                             value={shippingData.city}
                             onChange={(e) => setShippingData({ ...shippingData, city: e.target.value })}
                             className={`w-full px-4 py-3 border-2 rounded-lg focus:ring-2 focus:ring-gray-600 focus:border-gray-600 bg-white ${errors.city ? 'border-red-500' : 'border-gray-300'}`}
@@ -687,7 +510,7 @@ export default function CheckoutPage() {
                             ))}
                           </select>
                         ) : (
-                          <input
+                          <input id="checkout-field-9"
                             type="text"
                             value={shippingData.city}
                             onChange={(e) => setShippingData({ ...shippingData, city: e.target.value })}
@@ -699,17 +522,6 @@ export default function CheckoutPage() {
                       </div>
                     </div>
 
-                    {checkoutType === 'account' && (
-                      <label className="flex items-center space-x-3 cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={saveAddress}
-                          onChange={(e) => setSaveAddress(e.target.checked)}
-                          className="w-5 h-5 text-gray-900 rounded border-gray-300 focus:ring-gray-600"
-                        />
-                        <span className="text-sm text-gray-700">Save this address for future orders</span>
-                      </label>
-                    )}
                   </div>
 
                   <button
@@ -796,13 +608,6 @@ export default function CheckoutPage() {
                   <h2 className="text-xl font-bold text-gray-900 mt-8 mb-4">Payment Method</h2>
                   <p className="text-sm text-gray-600 mb-4">Pay securely with Mobile Money.</p>
                   <div className="grid grid-cols-1 gap-3">
-                    {/* Paystack — temporarily disabled
-                    <label className={`flex items-center gap-3 p-4 border-2 rounded-xl cursor-pointer transition-colors ${paymentMethod === 'paystack' ? 'border-gray-900 bg-gray-50' : 'border-gray-300 hover:border-gray-400'}`}>
-                      <input type="radio" name="payment" value="paystack" checked={paymentMethod === 'paystack'} onChange={() => setPaymentMethod('paystack')} className="w-5 h-5 text-gray-900 flex-shrink-0" />
-                      <i className="ri-bank-card-line text-xl text-gray-600 flex-shrink-0"></i>
-                      <div className="min-w-0"><p className="font-semibold text-gray-900">Paystack</p><p className="text-xs text-gray-600 truncate">Card & Mobile Money</p></div>
-                    </label>
-                    */}
                     <label
                       className="flex items-center gap-3 p-4 border-2 rounded-xl cursor-pointer transition-colors border-gray-900 bg-gray-50"
                     >
@@ -820,20 +625,6 @@ export default function CheckoutPage() {
                         <p className="text-xs text-gray-600 truncate">MTN, Vodafone, AirtelTigo</p>
                       </div>
                     </label>
-                    {/* Stripe — temporarily disabled
-                    <label className={`flex items-center gap-3 p-4 border-2 rounded-xl cursor-pointer transition-colors ${paymentMethod === 'stripe' ? 'border-gray-900 bg-gray-50' : 'border-gray-300 hover:border-gray-400'}`}>
-                      <input type="radio" name="payment" value="stripe" checked={paymentMethod === 'stripe'} onChange={() => setPaymentMethod('stripe')} className="w-5 h-5 text-gray-900 flex-shrink-0" />
-                      <i className="ri-bank-card-2-line text-xl text-gray-600 flex-shrink-0"></i>
-                      <div className="min-w-0"><p className="font-semibold text-gray-900">Stripe</p><p className="text-xs text-gray-600 truncate">Card (Visa, Mastercard)</p></div>
-                    </label>
-                    */}
-                    {/* PayPal — temporarily disabled
-                    <label className={`flex items-center gap-3 p-4 border-2 rounded-xl cursor-pointer transition-colors ${paymentMethod === 'paypal' ? 'border-gray-900 bg-gray-50' : 'border-gray-300 hover:border-gray-400'}`}>
-                      <input type="radio" name="payment" value="paypal" checked={paymentMethod === 'paypal'} onChange={() => setPaymentMethod('paypal')} className="w-5 h-5 text-gray-900 flex-shrink-0" />
-                      <i className="ri-paypal-line text-xl text-gray-600 flex-shrink-0"></i>
-                      <div className="min-w-0"><p className="font-semibold text-gray-900">PayPal</p><p className="text-xs text-gray-600 truncate">PayPal balance</p></div>
-                    </label>
-                    */}
                   </div>
 
                   <div className="flex flex-col-reverse md:flex-row gap-4 mt-6">

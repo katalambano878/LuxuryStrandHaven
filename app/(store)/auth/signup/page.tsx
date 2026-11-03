@@ -116,17 +116,16 @@ export default function SignupPage() {
 
       if (data.user) {
         // Send Welcome Notification
-        fetch('/api/notifications', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            type: 'welcome',
-            payload: {
-              email: formData.email,
-              firstName: formData.firstName
-            }
-          })
-        }).catch(err => console.error('Welcome notification error:', err));
+        if (data.session?.access_token) {
+          fetch('/api/notifications', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${data.session.access_token}`,
+            },
+            body: JSON.stringify({ type: 'welcome', payload: {} })
+          }).catch(err => console.error('Welcome notification error:', err));
+        }
         
         if (!data.session) {
           setSuccess(true);

@@ -10,7 +10,8 @@ export async function GET(request: Request) {
     const authHeader = request.headers.get('authorization');
     const cronSecret = process.env.CRON_SECRET;
     
-    if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
+    // Without a secret anyone could trigger reminder SMS/emails to every unpaid order.
+    if (!cronSecret || authHeader !== `Bearer ${cronSecret}`) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
@@ -78,6 +79,6 @@ export async function GET(request: Request) {
 
   } catch (error: any) {
     console.error('[Payment Reminders] Error:', error);
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ error: 'Reminder run failed' }, { status: 500 });
   }
 }

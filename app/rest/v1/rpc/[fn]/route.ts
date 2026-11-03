@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/db/supabase-compat";
 import { isPlainPostgres } from "@/lib/db/mode";
+import { isStaff, resolveCaller } from "@/lib/db/rest-policy";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -28,6 +29,13 @@ export async function POST(
   const { fn } = await ctx.params;
   if (!PG_IDENT.test(fn)) {
     return NextResponse.json({ message: "Invalid function name" }, { status: 400 });
+  }
+
+  // Database functions run as the table owner (SECURITY DEFINER-like), so
+  // only staff may call them from the browser. Storefront flows use API routes.
+  const caller = await resolveCaller(req);
+  if (!isStaff(caller)) {
+    return NextResponse.json({ message: "Not allowed" }, { status: 403 });
   }
 
   const args = (await req.json().catch(() => ({}))) as Record<string, any>;

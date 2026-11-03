@@ -56,14 +56,13 @@ export default function AdminDashboard() {
         // 1. Fetch ALL Orders for count & customers
         const { data: allOrdersData, error: ordersError } = await supabase
           .from('orders')
-          .select('total, status, payment_status, created_at, email');
+          .select('id, total, status, payment_status, created_at, email');
 
         if (ordersError) throw ordersError;
 
         // Only count PAID orders for revenue & avg order value
         const paidOrders = allOrdersData?.filter(o => o.payment_status === 'paid') || [];
         const totalRevenue = paidOrders.reduce((sum, order) => sum + (order.total || 0), 0);
-        const totalOrders = allOrdersData?.length || 0;
         const paidOrderCount = paidOrders.length;
         const avgOrderValue = paidOrderCount > 0 ? totalRevenue / paidOrderCount : 0;
 
@@ -99,36 +98,59 @@ export default function AdminDashboard() {
         }));
         setChartData(processedChartData);
 
+        // Change vs the previous 30 days, from paid orders only.
+        const DAY = 24 * 60 * 60 * 1000;
+        const now = Date.now();
+        const inWindow = (o: any, from: number, to: number) => {
+          const t = new Date(o.created_at).getTime();
+          return t >= from && t < to;
+        };
+        const current = paidOrders.filter(o => inWindow(o, now - 30 * DAY, now + DAY));
+        const previous = paidOrders.filter(o => inWindow(o, now - 60 * DAY, now - 30 * DAY));
+        const sum = (list: any[]) => list.reduce((acc, o) => acc + (Number(o.total) || 0), 0);
+        const pct = (cur: number, prev: number) => {
+          if (prev === 0) return cur === 0 ? '0%' : 'New';
+          const change = ((cur - prev) / prev) * 100;
+          return `${change >= 0 ? '+' : ''}${change.toFixed(0)}%`;
+        };
+        const curRevenue = sum(current);
+        const prevRevenue = sum(previous);
+        const curCustomers = new Set(current.map(o => o.email)).size;
+        const prevCustomers = new Set(previous.map(o => o.email)).size;
+        const curAov = current.length ? curRevenue / current.length : 0;
+        const prevAov = previous.length ? prevRevenue / previous.length : 0;
+        const payingCustomers = new Set(paidOrders.map(o => o.email)).size;
+
         setStats([
           {
             title: 'Total Revenue',
             value: `GH₵ ${totalRevenue.toFixed(2)}`,
-            change: '+0%', // Dynamic change requires date filtering logic which is complex
-            trend: 'up',
+            change: `${pct(curRevenue, prevRevenue)} (30d)`,
+            trend: curRevenue >= prevRevenue ? 'up' : 'down',
             icon: 'ri-money-dollar-circle-line',
             color: 'gray'
           },
           {
-            title: 'Orders',
-            value: totalOrders.toString(),
-            change: '+0%',
-            trend: 'up',
+            title: 'Paid Orders',
+            value: paidOrderCount.toString(),
+            change: `${pct(current.length, previous.length)} (30d)`,
+            trend: current.length >= previous.length ? 'up' : 'down',
             icon: 'ri-shopping-bag-line',
             color: 'blue'
           },
           {
-            title: 'Customers (Active)',
-            value: uniqueCustomers.toString(), // Proxy
-            change: '+0%',
-            trend: 'up',
+            title: 'Paying Customers',
+            value: payingCustomers.toString(),
+            change: `${pct(curCustomers, prevCustomers)} (30d)`,
+            trend: curCustomers >= prevCustomers ? 'up' : 'down',
             icon: 'ri-group-line',
             color: 'purple'
           },
           {
             title: 'Avg Order Value',
             value: `GH₵ ${avgOrderValue.toFixed(2)}`,
-            change: '+0%',
-            trend: 'up',
+            change: `${pct(curAov, prevAov)} (30d)`,
+            trend: curAov >= prevAov ? 'up' : 'down',
             icon: 'ri-line-chart-line',
             color: 'amber'
           }
@@ -177,23 +199,43 @@ export default function AdminDashboard() {
           })));
         }
 
-        // 5. Fetch Top Products (Approximation: High Price or just Random for now, 
-        // real top selling requires aggregation on order_items which is complex for client-side)
-        // real top selling requires aggregation on order_items which is complex for client-side)
-        const { data: productData } = await supabase.from('products').select('*, product_images(url, position)').order('created_at', { ascending: false }).limit(4);
-        if (productData) {
-          setTopProducts(productData.map((p: any) => {
-            const imgFromRelation = p.product_images?.[0]?.url;
-            const imgFromColumn = Array.isArray(p.images) ? (p.images[0]?.url || p.images[0]) : null;
+        // 5. Top products: best sellers by units in paid orders from the last 30 days.
+        const recentPaidIds = current.map(o => o.id);
+        const sales = new Map<string, { units: number; revenue: number }>();
+        for (let i = 0; i < recentPaidIds.length; i += 100) {
+          const { data: items } = await supabase
+            .from('order_items')
+            .select('product_id, quantity, total_price')
+            .in('order_id', recentPaidIds.slice(i, i + 100));
+          (items || []).forEach((it: any) => {
+            if (!it.product_id) return;
+            const entry = sales.get(it.product_id) || { units: 0, revenue: 0 };
+            entry.units += Number(it.quantity) || 0;
+            entry.revenue += Number(it.total_price) || 0;
+            sales.set(it.product_id, entry);
+          });
+        }
+        const topIds = Array.from(sales.entries()).sort((a, b) => b[1].units - a[1].units).slice(0, 4).map(([id]) => id);
+        if (topIds.length > 0) {
+          const { data: productData } = await supabase
+            .from('products')
+            .select('id, name, quantity, product_images(url, position)')
+            .in('id', topIds);
+          const byId = new Map((productData || []).map((p: any) => [p.id, p]));
+          setTopProducts(topIds.filter(id => byId.has(id)).map(id => {
+            const p: any = byId.get(id);
+            const images = [...(p.product_images || [])].sort((a: any, b: any) => (a.position ?? 0) - (b.position ?? 0));
             return {
-              id: p.slug,
+              id: p.id,
               name: p.name,
-              image: imgFromRelation || imgFromColumn || 'https://via.placeholder.com/200',
-              sales: 0,
-              revenue: 0,
+              image: images[0]?.url || '/placeholder-product.svg',
+              sales: sales.get(id)!.units,
+              revenue: sales.get(id)!.revenue,
               stock: p.quantity
             };
           }));
+        } else {
+          setTopProducts([]);
         }
 
       } catch (error) {
@@ -414,12 +456,15 @@ export default function AdminDashboard() {
 
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 sm:p-6 overflow-hidden">
           <div className="flex items-center justify-between mb-6">
-            <h2 className="text-xl font-bold text-gray-900">Products</h2>
+            <h2 className="text-xl font-bold text-gray-900">Best Sellers (last 30 days)</h2>
             <Link href="/admin/products" className="text-gray-900 hover:text-gray-800 font-medium text-sm whitespace-nowrap cursor-pointer">
               View All <i className="ri-arrow-right-line ml-1"></i>
             </Link>
           </div>
 
+          {topProducts.length === 0 && (
+            <p className="text-sm text-gray-500">No paid sales in the last 30 days yet.</p>
+          )}
           <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-4">
             {topProducts.map((product) => (
               <div key={product.id} className="border border-gray-200 rounded-xl p-4 hover:shadow-md transition-shadow">
@@ -427,6 +472,7 @@ export default function AdminDashboard() {
                   <img src={product.image} alt={product.name} className="w-full h-full object-cover" />
                 </div>
                 <h3 className="font-semibold text-gray-900 mb-2 line-clamp-2">{product.name}</h3>
+                <p className="text-sm text-gray-600">{product.sales} sold · GH₵ {Number(product.revenue).toFixed(2)}</p>
                 <div className="mt-3 pt-3 border-t border-gray-200 flex items-center justify-between">
                   <span className="text-sm text-gray-600">Stock: {product.stock}</span>
                   <Link href={`/admin/products/${product.id}`} className="text-gray-900 hover:text-gray-800 text-sm font-medium whitespace-nowrap cursor-pointer">

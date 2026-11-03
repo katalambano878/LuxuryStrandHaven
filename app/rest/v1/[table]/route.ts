@@ -4,6 +4,14 @@ import {
   applyPostgrestParams,
 } from "@/lib/db/supabase-compat";
 import { isPlainPostgres } from "@/lib/db/mode";
+import {
+  authorizeDelete,
+  authorizeInsert,
+  authorizeRead,
+  authorizeUpdate,
+  guardFor,
+  resolveCaller,
+} from "@/lib/db/rest-policy";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -41,6 +49,16 @@ function jsonError(message: string, status = 400) {
   );
 }
 
+/** Query-string parameters that are not row filters. */
+const NON_FILTER_PARAMS = new Set(["select", "order", "limit", "offset", "columns", "on_conflict"]);
+
+function hasRowFilter(params: URLSearchParams): boolean {
+  for (const key of params.keys()) {
+    if (!NON_FILTER_PARAMS.has(key) && !key.includes(".")) return true;
+  }
+  return false;
+}
+
 export async function OPTIONS() {
   return new NextResponse(null, { status: 204, headers: corsHeaders() });
 }
@@ -55,23 +73,30 @@ export async function GET(
   const { table } = await ctx.params;
   if (!PG_IDENT.test(table)) return jsonError("Invalid table");
 
+  const caller = await resolveCaller(req);
   const client = createClient();
-  const qb = client.from(table);
-  const select = req.nextUrl.searchParams.get("select") || "*";
-  if (preferCount(req)) {
-    qb.select(select, {
-      count: "exact",
-      head: req.headers.get("prefer")?.includes("head=true"),
+  const qb = client.from(table).setGuard(guardFor(caller));
+  try {
+    const select = req.nextUrl.searchParams.get("select") || "*";
+    if (preferCount(req)) {
+      qb.select(select, {
+        count: "exact",
+        head: req.headers.get("prefer")?.includes("head=true"),
+      });
+    } else {
+      qb.select(select);
+    }
+    // Apply filters/order/limit without re-applying select
+    const params = new URLSearchParams(req.nextUrl.searchParams);
+    params.delete("select");
+    const decision = authorizeRead(caller, table, params, qb);
+    if (!decision.ok) return jsonError(decision.message, decision.status);
+    applyPostgrestParams(qb, params, {
+      preferSingle: preferSingle(req),
     });
-  } else {
-    qb.select(select);
+  } catch (err) {
+    return jsonError(err instanceof Error ? err.message : "Invalid query");
   }
-  // Apply filters/order/limit without re-applying select
-  const params = new URLSearchParams(req.nextUrl.searchParams);
-  params.delete("select");
-  applyPostgrestParams(qb as any, params, {
-    preferSingle: preferSingle(req),
-  });
 
   const result = await qb;
   if (result.error) {
@@ -103,8 +128,18 @@ export async function POST(
   const body = await req.json().catch(() => null);
   if (body == null) return jsonError("Invalid JSON body");
 
+  const caller = await resolveCaller(req);
+  const decision = authorizeInsert(caller, table, body);
+  if (!decision.ok) return jsonError(decision.message, decision.status);
+
   const client = createClient();
-  let qb = client.from(table).insert(body);
+  const rows = Array.isArray(body) ? decision.value : decision.value[0];
+  const onConflict = req.nextUrl.searchParams.get("on_conflict");
+  const isUpsert = (req.headers.get("prefer") || "").includes("resolution=merge-duplicates");
+  let qb = isUpsert
+    ? client.from(table).upsert(rows, onConflict ? { onConflict } : undefined)
+    : client.from(table).insert(rows);
+  qb.setGuard(guardFor(caller));
   if (preferReturn(req) || preferSingle(req)) {
     qb = qb.select("*") as typeof qb;
   }
@@ -130,11 +165,24 @@ export async function PATCH(
   if (!PG_IDENT.test(table)) return jsonError("Invalid table");
 
   const body = await req.json().catch(() => null);
-  if (body == null || typeof body !== "object") return jsonError("Invalid JSON body");
+  if (body == null || typeof body !== "object" || Array.isArray(body)) {
+    return jsonError("Invalid JSON body");
+  }
+  if (!hasRowFilter(req.nextUrl.searchParams)) {
+    return jsonError("Updates need a filter", 400);
+  }
 
+  const caller = await resolveCaller(req);
   const client = createClient();
-  let qb = client.from(table).update(body);
-  applyPostgrestParams(qb as any, req.nextUrl.searchParams);
+  let qb = client.from(table).setGuard(guardFor(caller));
+  try {
+    const decision = authorizeUpdate(caller, table, body, qb);
+    if (!decision.ok) return jsonError(decision.message, decision.status);
+    qb = qb.update(decision.value);
+    applyPostgrestParams(qb, req.nextUrl.searchParams);
+  } catch (err) {
+    return jsonError(err instanceof Error ? err.message : "Invalid query");
+  }
   if (preferReturn(req) || preferSingle(req)) {
     qb = qb.select("*") as typeof qb;
   }
@@ -155,10 +203,21 @@ export async function DELETE(
   }
   const { table } = await ctx.params;
   if (!PG_IDENT.test(table)) return jsonError("Invalid table");
+  if (!hasRowFilter(req.nextUrl.searchParams)) {
+    return jsonError("Deletes need a filter", 400);
+  }
+
+  const caller = await resolveCaller(req);
+  const decision = authorizeDelete(caller, table);
+  if (!decision.ok) return jsonError(decision.message, decision.status);
 
   const client = createClient();
-  let qb = client.from(table).delete();
-  applyPostgrestParams(qb as any, req.nextUrl.searchParams);
+  let qb = client.from(table).delete().setGuard(guardFor(caller));
+  try {
+    applyPostgrestParams(qb, req.nextUrl.searchParams);
+  } catch (err) {
+    return jsonError(err instanceof Error ? err.message : "Invalid query");
+  }
   if (preferReturn(req)) {
     qb = qb.select("*") as typeof qb;
   }

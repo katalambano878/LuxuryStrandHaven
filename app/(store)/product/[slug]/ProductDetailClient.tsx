@@ -11,6 +11,7 @@ import ProductReviews from '@/components/ProductReviews';
 import { StructuredData, generateProductSchema, generateBreadcrumbSchema } from '@/components/SEOHead';
 import { notFound } from 'next/navigation';
 import { useCart } from '@/context/CartContext';
+import { useWishlist } from '@/context/WishlistContext';
 import { usePageTitle } from '@/hooks/usePageTitle';
 
 // Map common color names to hex values for the swatch preview
@@ -37,10 +38,10 @@ export default function ProductDetailClient({ slug }: { slug: string }) {
   const [selectedOptions, setSelectedOptions] = useState<Record<string, string>>({});
   const [quantity, setQuantity] = useState(1);
   const [activeTab, setActiveTab] = useState('description');
-  const [isWishlisted, setIsWishlisted] = useState(false);
   const [relatedProducts, setRelatedProducts] = useState<any[]>([]);
 
   const { addToCart } = useCart();
+  const { isInWishlist, addToWishlist, removeFromWishlist } = useWishlist();
 
   useEffect(() => {
     async function fetchProduct() {
@@ -103,6 +104,8 @@ export default function ProductDetailClient({ slug }: { slug: string }) {
           rating: productData.rating_avg || 0,
           reviewCount: 0,
           stockCount: productData.quantity,
+          // Server lets these sell past zero stock (pre-orders, untracked items)
+          sellWithoutStock: productData.track_quantity === false || productData.continue_selling === true,
           moq: productData.moq || 1,
           colors: [...new Set(rawVariants.map((v: any) => v.color).filter(Boolean))],
           colorHexMap,
@@ -116,7 +119,7 @@ export default function ProductDetailClient({ slug }: { slug: string }) {
 
         // Ensure at least one image/placeholder
         if (transformedProduct.images.length === 0) {
-          transformedProduct.images = ['https://via.placeholder.com/800x800?text=No+Image'];
+          transformedProduct.images = ['/placeholder-product.svg'];
         }
 
         setProduct(transformedProduct);
@@ -155,7 +158,7 @@ export default function ProductDetailClient({ slug }: { slug: string }) {
                 slug: p.slug,
                 name: p.name,
                 price: p.price,
-                image: p.product_images?.[0]?.url || 'https://via.placeholder.com/800?text=No+Image',
+                image: p.product_images?.[0]?.url || '/placeholder-product.svg',
                 rating: p.rating_avg || 0,
                 reviewCount: 0,
                 inStock: effectiveStock > 0,
@@ -240,7 +243,8 @@ export default function ProductDetailClient({ slug }: { slug: string }) {
   // Determine the active price: variant price if selected, otherwise base price
   const activePrice = selectedVariant?.price ?? product?.price ?? 0;
   const activeComparePrice = selectedVariant?.compare_at_price ?? product?.compare_at_price ?? null;
-  const activeStock = selectedVariant ? (selectedVariant.stock ?? selectedVariant.quantity ?? product?.stockCount ?? 0) : (product?.stockCount ?? 0);
+  const trackedStock = selectedVariant ? (selectedVariant.stock ?? selectedVariant.quantity ?? product?.stockCount ?? 0) : (product?.stockCount ?? 0);
+  const activeStock = product?.sellWithoutStock ? Math.max(trackedStock, 999) : trackedStock;
 
   const handleAddToCart = () => {
     if (!product) return;
@@ -263,6 +267,25 @@ export default function ProductDetailClient({ slug }: { slug: string }) {
       slug: product.slug,
       maxStock: activeStock,
       moq: product.moq || 1
+    });
+  };
+
+  const isWishlisted = product ? isInWishlist(product.id) : false;
+  const toggleWishlist = () => {
+    if (!product) return;
+    if (isWishlisted) {
+      removeFromWishlist(product.id);
+      return;
+    }
+    addToWishlist({
+      id: product.id,
+      name: product.name,
+      price: product.price,
+      originalPrice: product.compare_at_price || undefined,
+      image: product.images[0] || '/placeholder-product.svg',
+      rating: product.rating,
+      inStock: hasVariants || product.sellWithoutStock || (product.stockCount ?? 0) > 0,
+      slug: product.slug,
     });
   };
 
@@ -419,7 +442,10 @@ export default function ProductDetailClient({ slug }: { slug: string }) {
                     <h1 className="text-3xl font-bold text-gray-900 mb-2">{product.name}</h1>
                   </div>
                   <button
-                    onClick={() => setIsWishlisted(!isWishlisted)}
+                    type="button"
+                    aria-label={isWishlisted ? 'Remove from wishlist' : 'Save to wishlist'}
+                    aria-pressed={isWishlisted}
+                    onClick={toggleWishlist}
                     className="w-10 h-10 flex items-center justify-center border border-gray-200 hover:border-gray-700 rounded-full transition-colors cursor-pointer shrink-0 ml-4"
                   >
                     <i className={`${isWishlisted ? 'ri-heart-fill text-red-600' : 'ri-heart-line text-gray-700'} text-lg`}></i>

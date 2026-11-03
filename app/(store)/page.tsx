@@ -248,7 +248,7 @@ export default function Home() {
               >
                 <div className="aspect-[4/5] rounded-[1.25rem] overflow-hidden relative shadow-sm hover:shadow-lg transition-all duration-500 bg-gray-100">
                   <Image
-                    src={category.image || category.image_url || 'https://via.placeholder.com/600x800?text=' + encodeURIComponent(category.name)}
+                    src={category.image || category.image_url || '/placeholder-product.svg'}
                     alt={category.name}
                     fill
                     className="object-cover transition-transform duration-700 group-hover:scale-105"
@@ -333,12 +333,12 @@ export default function Home() {
                     name={product.name}
                     price={product.price}
                     originalPrice={product.compare_at_price}
-                    image={product.product_images?.[0]?.url || 'https://via.placeholder.com/400x500'}
-                    rating={product.rating_avg || 5}
+                    image={product.product_images?.[0]?.url || '/placeholder-product.svg'}
+                    rating={product.rating_avg || 0}
                     reviewCount={product.review_count || 0}
                     badge={product.featured ? 'Featured' : undefined}
-                    inStock={effectiveStock > 0}
-                    maxStock={effectiveStock || 50}
+                    inStock={effectiveStock > 0 || product.track_quantity === false || product.continue_selling === true}
+                    maxStock={(product.track_quantity === false || product.continue_selling) ? 999 : effectiveStock || 50}
                     moq={product.moq || 1}
                     hasVariants={hasVariants}
                     minVariantPrice={minVariantPrice}

@@ -1,4 +1,5 @@
 import { serveStoredFile, statObject } from "@/lib/db/storage";
+import { PUBLIC_BUCKETS } from "@/lib/db/rest-policy";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -10,7 +11,7 @@ async function respond(
   bucket: string,
   objectPath: string
 ): Promise<Response> {
-  const file = await statObject(bucket, objectPath);
+  const file = PUBLIC_BUCKETS.has(bucket) ? await statObject(bucket, objectPath) : null;
   if (!file) {
     return new Response(JSON.stringify({ error: "Object not found" }), {
       status: 404,

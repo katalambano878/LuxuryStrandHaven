@@ -25,11 +25,16 @@ function publicBase(): string {
 }
 
 function signingSecret(): string {
-  return (
+  const secret =
     process.env.STORAGE_SIGNING_SECRET ||
+    process.env.AUTH_JWT_SECRET ||
     process.env.JWT_SECRET ||
-    "storage-dev-secret"
-  );
+    process.env.SUPABASE_JWT_SECRET;
+  if (secret) return secret;
+  if (process.env.NODE_ENV === "production") {
+    throw new Error("STORAGE_SIGNING_SECRET (or AUTH_JWT_SECRET) must be set in production");
+  }
+  return "storage-dev-secret";
 }
 
 export function signObjectToken(bucket: string, objectPath: string, expEpoch: number): string {
@@ -53,12 +58,27 @@ export function verifyObjectToken(
   return out === 0;
 }
 
+const BUCKET_NAME = /^[a-z0-9][a-z0-9_-]{0,62}$/;
+
 function safeJoin(bucket: string, objectPath: string): string {
+  if (!BUCKET_NAME.test(bucket)) throw new Error("Invalid bucket");
   const clean = objectPath.replace(/^\/+/, "");
-  const full = path.normalize(path.join(STORAGE_ROOT, bucket, clean));
-  const base = path.normalize(path.join(STORAGE_ROOT, bucket));
-  if (!full.startsWith(base)) throw new Error("Path traversal blocked");
+  if (!clean || clean.includes("\0") || clean.endsWith(".meta.json")) {
+    throw new Error("Invalid object path");
+  }
+  const base = path.resolve(STORAGE_ROOT, bucket);
+  const full = path.resolve(base, clean);
+  if (!full.startsWith(base + path.sep)) throw new Error("Path traversal blocked");
   return full;
+}
+
+/** Upload types the store accepts. Anything else (HTML, JS, …) is refused. */
+const ALLOWED_UPLOAD_TYPE = /^(image\/(jpeg|png|webp|gif|avif|svg\+xml|x-icon|vnd\.microsoft\.icon)|video\/(mp4|quicktime|webm|ogg|x-m4v|x-msvideo)|application\/pdf)$/i;
+const ALLOWED_UPLOAD_EXT = /\.(jpe?g|png|webp|gif|avif|svg|ico|mp4|m4v|mov|qt|webm|ogg|avi|pdf)$/i;
+export const MAX_UPLOAD_BYTES = 200 * 1024 * 1024;
+
+export function isAllowedUpload(objectPath: string, contentType: string): boolean {
+  return ALLOWED_UPLOAD_EXT.test(objectPath) && (ALLOWED_UPLOAD_TYPE.test(contentType) || contentType === "application/octet-stream");
 }
 
 export async function readObject(
@@ -89,6 +109,9 @@ function guessContentType(p: string): string {
     png: "image/png",
     webp: "image/webp",
     gif: "image/gif",
+    avif: "image/avif",
+    ico: "image/x-icon",
+    svg: "image/svg+xml",
     pdf: "application/pdf",
     mp4: "video/mp4",
     m4v: "video/mp4",
@@ -116,7 +139,11 @@ export async function statObject(
     let contentType = guessContentType(objectPath);
     try {
       const meta = JSON.parse(await fs.readFile(filePath + ".meta.json", "utf8"));
-      if (meta.contentType && !contentType.startsWith("video/")) {
+      if (
+        meta.contentType &&
+        !contentType.startsWith("video/") &&
+        ALLOWED_UPLOAD_TYPE.test(meta.contentType)
+      ) {
         contentType = meta.contentType;
       }
     } catch {
@@ -245,6 +272,9 @@ export function serveStoredFile(
     "Accept-Ranges": "bytes",
     "Cache-Control": cacheControl,
     "Access-Control-Allow-Origin": "*",
+    "X-Content-Type-Options": "nosniff",
+    // Uploaded files are data, never a page: no scripts even if opened directly.
+    "Content-Security-Policy": "default-src 'none'; img-src 'self' data:; media-src 'self'; style-src 'unsafe-inline'; sandbox",
   });
 
   const range = req.headers.get("range");

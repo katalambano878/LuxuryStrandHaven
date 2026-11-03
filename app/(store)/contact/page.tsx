@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { useCMS } from '@/context/CMSContext';
 import { supabase } from '@/lib/supabase';
 import { usePageTitle } from '@/hooks/usePageTitle';
@@ -27,6 +27,12 @@ export default function ContactPage() {
   const [submitStatus, setSubmitStatus] = useState('idle' as 'idle' | 'success' | 'error');
   const { getToken, verifying } = useRecaptcha();
 
+  // Links like /contact?subject=Return%20request prefill the subject.
+  useEffect(() => {
+    const subject = new URLSearchParams(window.location.search).get('subject');
+    if (subject) setFormData((prev) => (prev.subject ? prev : { ...prev, subject: subject.slice(0, 120) }));
+  }, []);
+
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setIsSubmitting(true);
@@ -52,9 +58,8 @@ export default function ContactPage() {
           message: formData.message,
         });
 
-      if (error) {
-        console.log('Note: contact_submissions table may not exist');
-      }
+      // The message must be saved before we tell the customer it was sent.
+      if (error) throw error;
 
       // Send Contact Notification
       fetch('/api/notifications', {

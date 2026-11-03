@@ -38,8 +38,10 @@ function ShopContent() {
     const sort = searchParams.get('sort');
     const search = searchParams.get('search');
 
-    if (category) setSelectedCategory(category);
-    if (sort) setSortBy(sort);
+    // Follow the URL both ways so leaving /shop?category=x clears the filter.
+    setSelectedCategory(category || 'all');
+    const sortAliases: Record<string, string> = { newest: 'new', bestsellers: 'popular' };
+    if (sort) setSortBy(sortAliases[sort] || sort);
     // Search is handled in the fetch function via searchParams directly or we could add a state for it
   }, [searchParams]);
 
@@ -206,12 +208,12 @@ function ShopContent() {
               name: p.name,
               price: p.price,
               originalPrice: p.compare_at_price,
-              image: sortedImages?.[0]?.url || 'https://via.placeholder.com/800x800?text=No+Image',
+              image: sortedImages?.[0]?.url || '/placeholder-product.svg',
               rating: p.rating_avg || 0,
               reviewCount: 0, // Need to implement reviews relation
               badge: p.compare_at_price > p.price ? 'Sale' : undefined, // Simple badge logic
-              inStock: effectiveStock > 0,
-              maxStock: effectiveStock || 50,
+              inStock: effectiveStock > 0 || p.track_quantity === false || p.continue_selling === true,
+              maxStock: (p.track_quantity === false || p.continue_selling) ? 999 : effectiveStock || 50,
               moq: p.moq || 1,
               category: p.categories?.name,
               hasVariants,

@@ -44,7 +44,11 @@ export default function NotificationsPage() {
             const recipients: any[] = [];
             for (const c of (customers || [])) {
                 const phones = [c.phone, c.secondary_phone].filter(Boolean).map((p: string) => normalizePhone(p));
-                const emails = [c.email, c.secondary_email].filter(Boolean).map((e: string) => e.toLowerCase().trim());
+                // POS walk-ins get placeholder addresses (…@pos.local); those can't receive mail.
+                const emails = [c.email, c.secondary_email]
+                    .filter(Boolean)
+                    .map((e: string) => e.toLowerCase().trim())
+                    .filter((e: string) => !e.endsWith('@pos.local') && !e.endsWith('@store.local'));
 
                 // Pick first unique phone for this customer
                 const uniquePhone = phones.find(p => !seenPhones.has(p)) || null;

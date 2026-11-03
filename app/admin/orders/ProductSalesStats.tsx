@@ -46,8 +46,8 @@ export default function ProductSalesStats({ isOpen, onClose }: { isOpen: boolean
         // 'all' leaves startDate as null
 
         try {
-            // We fetch order_items and filter by the parent order's created_at
-            let query = supabase
+            // supabase-js builders are mutable, so each batch needs a fresh one.
+            const itemsQuery = () => supabase
                 .from('order_items')
                 .select(`
           quantity,
@@ -55,7 +55,7 @@ export default function ProductSalesStats({ isOpen, onClose }: { isOpen: boolean
           product_id,
           variant_name,
           total_price,
-          orders!inner (
+          orders (
             id,
             created_at,
             status,
@@ -64,15 +64,24 @@ export default function ProductSalesStats({ isOpen, onClose }: { isOpen: boolean
         `);
 
             // Only include paid orders (confirmed) and exclude cancelled
-            query = query.eq('orders.payment_status', 'paid').neq('orders.status', 'cancelled');
-
-            if (startDate) {
-                query = query.gte('orders.created_at', startDate);
+            // Filter on the orders first (the data API can't filter on embedded columns),
+            // then fetch only those orders' items.
+            let ordersQuery = supabase
+                .from('orders')
+                .select('id')
+                .eq('payment_status', 'paid')
+                .neq('status', 'cancelled');
+            if (startDate) ordersQuery = ordersQuery.gte('created_at', startDate);
+            const { data: paidOrders, error: ordersError } = await ordersQuery;
+            if (ordersError) throw ordersError;
+            // Batches keep the request URL short when there are many orders.
+            const ids = (paidOrders || []).map((o: any) => o.id);
+            const data: any[] = [];
+            for (let i = 0; i < ids.length; i += 100) {
+                const { data: chunk, error } = await itemsQuery().in('order_id', ids.slice(i, i + 100));
+                if (error) throw error;
+                data.push(...(chunk || []));
             }
-
-            const { data, error } = await query;
-
-            if (error) throw error;
 
             if (data) {
                 const map = new Map<string, SalesStat>();

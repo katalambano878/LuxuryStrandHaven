@@ -1,5 +1,5 @@
 import { Resend } from 'resend';
-import { supabase } from '@/lib/supabase';
+import { supabaseAdmin as supabase } from '@/lib/supabase-admin';
 
 const resend = new Resend(process.env.RESEND_API_KEY || 'missing_api_key');
 const ADMIN_EMAIL = process.env.ADMIN_EMAIL || 'admin@example.com';
@@ -14,6 +14,16 @@ const BRAND = {
     url: (process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000').replace(/\/+$/, ''),
     phone: process.env.STORE_PHONE || '',
 };
+
+/** Escape text that came from customers before it goes into email HTML. */
+export function escapeHtml(value: unknown): string {
+    return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
 
 // Reusable branded email layout
 export function emailLayout(body: string, preheader?: string): string {
@@ -242,7 +252,7 @@ export async function sendOrderConfirmation(order: any) {
         }
         return 'Customer';
     };
-    const name = getName();
+    const name = escapeHtml(getName());
 
     // Prefer top-level phone, then shipping address phone
     const phone = orderPhone || shipping_address?.phone;
@@ -362,7 +372,7 @@ export async function sendOrderStatusUpdate(order: any, newStatus: string) {
         }
         return 'Customer';
     };
-    const name = getName();
+    const name = escapeHtml(getName());
     const phone = orderPhone || shipping_address?.phone;
     const trackingNumber = metadata?.tracking_number || '';
     const trackingUrl = `${baseUrl}/order-tracking?order=${order_number || id}`;
@@ -501,7 +511,7 @@ export async function sendPaymentLink(order: any) {
         }
         return 'Customer';
     };
-    const name = getName();
+    const name = escapeHtml(getName());
     const phone = orderPhone || shipping_address?.phone;
 
     console.log(`[Notification] Sending payment link for Order #${order_number} | Phone: ${phone ? 'Present' : 'Missing'}`);
@@ -542,41 +552,43 @@ ${emailButton('Pay Now — GH₵' + Number(total).toFixed(2), paymentUrl, '#d977
 }
 
 export async function sendContactMessage(data: { name: string, email: string, subject: string, message: string }) {
-    const { name, email, subject, message } = data;
+    const name = escapeHtml(String(data.name || 'there').slice(0, 120));
+    const email = String(data.email || '').trim().slice(0, 160);
+    const subject = escapeHtml(String(data.subject || 'your message').slice(0, 200));
+    const message = escapeHtml(String(data.message || '').slice(0, 5000)).replace(/\n/g, '<br>');
+    const validEmail = /^[^\s@<>"]+@[^\s@<>"]+\.[^\s@<>"]+$/.test(email);
 
-    // 1. Acknowledge to User
-    await sendEmail({
-        to: email,
-        subject: `We received your message: ${subject}`,
-        html: emailLayout(`
+    // 1. Acknowledge to the sender. The address is not verified, so the
+    //    acknowledgement never repeats what they wrote (no spam relay).
+    if (validEmail) {
+        await sendEmail({
+            to: email,
+            subject: `We received your message`,
+            html: emailLayout(`
 <div style="text-align:center;margin-bottom:24px;">
   <div style="width:64px;height:64px;background-color:${BRAND.colorLight};border-radius:50%;margin:0 auto 16px;line-height:64px;font-size:28px;">&#128172;</div>
   <h2 style="margin:0 0 4px;color:#111827;font-size:22px;">Message Received</h2>
   <p style="margin:0;color:#6b7280;font-size:14px;">We'll get back to you soon.</p>
 </div>
 
-<p style="color:#374151;font-size:14px;line-height:1.7;margin:16px 0;">Hi ${name},</p>
-<p style="color:#374151;font-size:14px;line-height:1.7;margin:0 0 16px;">Thank you for reaching out to ${BRAND.name}. We've received your message regarding <strong>"${subject}"</strong> and our team will respond as soon as possible.</p>
-
-<div style="background-color:#f9fafb;border-left:4px solid ${BRAND.color};border-radius:0 8px 8px 0;padding:16px 20px;margin:20px 0;">
-  <p style="color:#6b7280;font-size:12px;margin:0 0 6px;text-transform:uppercase;letter-spacing:0.5px;">Your message</p>
-  <p style="color:#374151;font-size:14px;margin:0;line-height:1.6;">${message}</p>
-</div>
+<p style="color:#374151;font-size:14px;line-height:1.7;margin:16px 0;">Hello,</p>
+<p style="color:#374151;font-size:14px;line-height:1.7;margin:0 0 16px;">Thank you for reaching out to ${BRAND.name}. We've received your message and our team will respond as soon as possible.</p>
 
 <p style="color:#6b7280;font-size:13px;margin:16px 0 0;">We typically respond within 24 hours.</p>
-`, `Thanks for contacting us, ${name}`)
-    });
+`, `Thanks for contacting ${BRAND.name}`)
+        });
+    }
 
     // 2. Alert Admin
     await sendEmail({
         to: ADMIN_EMAIL,
-        subject: `Contact: ${subject}`,
+        subject: `Contact: ${String(data.subject || 'New message').slice(0, 200)}`,
         html: emailLayout(`
 <h2 style="margin:0 0 16px;color:#111827;font-size:20px;">&#128233; New Contact Message</h2>
 
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#f9fafb;border-radius:12px;overflow:hidden;margin:16px 0;">
   ${emailInfoRow('From', name)}
-  ${emailInfoRow('Email', `<a href="mailto:${email}" style="color:${BRAND.color};">${email}</a>`)}
+  ${emailInfoRow('Email', validEmail ? `<a href="mailto:${escapeHtml(email)}" style="color:${BRAND.color};">${escapeHtml(email)}</a>` : escapeHtml(email))}
   ${emailInfoRow('Subject', subject)}
 </table>
 
@@ -585,7 +597,7 @@ export async function sendContactMessage(data: { name: string, email: string, su
   <p style="color:#374151;font-size:14px;margin:0;line-height:1.6;">${message}</p>
 </div>
 
-${emailButton('Reply to ' + name, `mailto:${email}?subject=Re: ${encodeURIComponent(subject)}`)}
-`, `New contact from ${name}: ${subject}`)
+${validEmail ? emailButton('Reply to ' + name, `mailto:${escapeHtml(email)}?subject=${encodeURIComponent('Re: ' + String(data.subject || ''))}`) : ''}
+`, `New contact from ${name}`)
     });
 }

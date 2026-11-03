@@ -3,7 +3,6 @@
 import Link from 'next/link';
 import { useState, useEffect, Suspense, useCallback } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { supabase } from '@/lib/supabase';
 
 function OrderTrackingContent() {
   const searchParams = useSearchParams();
@@ -16,39 +15,21 @@ function OrderTrackingContent() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  const fetchOrder = useCallback(async (orderNum: string) => {
+  const fetchOrder = useCallback(async (orderNum: string, emailToCheck = '') => {
     setLoading(true);
     setError('');
 
     try {
-      const { data, error: fetchError } = await supabase
-        .from('orders')
-        .select(`
-          *,
-          order_items (
-            id,
-            product_name,
-            variant_name,
-            quantity,
-            unit_price,
-            metadata,
-            products (
-              product_images (url)
-            )
-          )
-        `)
-        .eq('order_number', orderNum)
-        .single();
+      const res = await fetch('/api/orders/track', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ orderNumber: orderNum, email: emailToCheck }),
+      });
+      const result = await res.json().catch(() => ({}));
+      const data = result.order;
 
-      if (fetchError || !data) {
-        setError('Order not found. Please check your order number and try again.');
-        setIsTracking(false);
-        return;
-      }
-
-      // If email was provided, verify it matches
-      if (email && data.email?.toLowerCase() !== email.toLowerCase()) {
-        setError('The email address does not match this order.');
+      if (!res.ok || !data) {
+        setError(result.message || 'Order not found. Please check your order number and try again.');
         setIsTracking(false);
         return;
       }
@@ -61,7 +42,7 @@ function OrderTrackingContent() {
     } finally {
       setLoading(false);
     }
-  }, [email]);
+  }, []);
 
   // Auto-track if order number is in the URL
   useEffect(() => {
@@ -79,7 +60,7 @@ function OrderTrackingContent() {
       return;
     }
 
-    fetchOrder(orderNumber);
+    fetchOrder(orderNumber.trim(), email.trim());
   };
 
   // Build tracking timeline from real order data

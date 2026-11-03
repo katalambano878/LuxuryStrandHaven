@@ -2,7 +2,7 @@
 
 import bcrypt from "bcryptjs";
 import { SignJWT, jwtVerify } from "jose";
-import { randomUUID } from "crypto";
+import { createHash, randomBytes, randomUUID } from "crypto";
 import { query } from "./pool";
 import { authJwtSecret } from "./mode";
 
@@ -81,8 +81,42 @@ async function loadAppRole(userId: string): Promise<string | null> {
   }
 }
 
+// ---- session revocation ----------------------------------------------------
+// Every token carries the account's token version (`tv`). Changing the
+// password, resetting it or signing out bumps the version, which kills every
+// token issued before. Stored in raw_app_meta_data so no schema change is needed.
+
+const TV_CACHE_MS = 10_000;
+const tvCache = new Map<string, { tv: number; at: number }>();
+
+async function currentTokenVersion(userId: string): Promise<number | null> {
+  const hit = tvCache.get(userId);
+  if (hit && Date.now() - hit.at < TV_CACHE_MS) return hit.tv;
+  const { rows } = await query<{ tv: string | null }>(
+    `SELECT raw_app_meta_data->>'tv' AS tv FROM auth.users WHERE id = $1 AND deleted_at IS NULL LIMIT 1`,
+    [userId]
+  );
+  if (!rows[0]) return null;
+  const tv = Number(rows[0].tv) || 0;
+  tvCache.set(userId, { tv, at: Date.now() });
+  return tv;
+}
+
+export async function revokeSessions(userId: string): Promise<void> {
+  await query(
+    `UPDATE auth.users
+     SET raw_app_meta_data = COALESCE(raw_app_meta_data, '{}'::jsonb)
+       || jsonb_build_object('tv', COALESCE((raw_app_meta_data->>'tv')::int, 0) + 1),
+         updated_at = now()
+     WHERE id = $1`,
+    [userId]
+  );
+  tvCache.delete(userId);
+}
+
 async function mintSession(userRow: Record<string, any>): Promise<SessionTokens> {
   const appRole = await loadAppRole(userRow.id);
+  const tv = (await currentTokenVersion(userRow.id)) ?? 0;
   const user = rowToUser(userRow, appRole);
   const now = Math.floor(Date.now() / 1000);
   const sessionId = randomUUID();
@@ -95,6 +129,7 @@ async function mintSession(userRow: Record<string, any>): Promise<SessionTokens>
     app_metadata: user.app_metadata,
     user_metadata: user.user_metadata,
     session_id: sessionId,
+    tv,
   })
     .setProtectedHeader({ alg: "HS256", typ: "JWT" })
     .setSubject(user.id)
@@ -105,6 +140,7 @@ async function mintSession(userRow: Record<string, any>): Promise<SessionTokens>
   const refresh_token = await new SignJWT({
     typ: "refresh",
     session_id: sessionId,
+    tv,
   })
     .setProtectedHeader({ alg: "HS256", typ: "JWT" })
     .setSubject(user.id)
@@ -130,6 +166,8 @@ export async function verifyAccessToken(
     if (payload.typ === "refresh") return null;
     const userId = typeof payload.sub === "string" ? payload.sub : null;
     if (!userId) return null;
+    const tv = await currentTokenVersion(userId);
+    if (tv === null || (Number(payload.tv) || 0) !== tv) return null;
     return { userId, payload: payload as Record<string, any> };
   } catch {
     return null;
@@ -200,7 +238,14 @@ export async function signUpWithPassword(opts: {
 
   const id = randomUUID();
   const hash = bcrypt.hashSync(opts.password, 10);
-  const meta = opts.data || {};
+  // Only plain profile fields are accepted from the signup form.
+  const rawMeta = (opts.data || {}) as Record<string, unknown>;
+  const meta: Record<string, unknown> = {};
+  for (const k of ["full_name", "first_name", "last_name", "phone", "newsletter"]) {
+    const v = rawMeta[k];
+    if (typeof v === "string") meta[k] = v.slice(0, 120);
+    else if (typeof v === "boolean") meta[k] = v;
+  }
 
   await query(
     `INSERT INTO auth.users (
@@ -217,11 +262,21 @@ export async function signUpWithPassword(opts: {
   );
 
   // Ensure profile row exists (app expects profiles.id = auth.users.id)
+  const fullName =
+    (typeof meta.full_name === "string" && meta.full_name.trim()) ||
+    [meta.first_name, meta.last_name].filter((v) => typeof v === "string" && v.trim()).join(" ").trim() ||
+    email.split("@")[0];
+  const phone = typeof meta.phone === "string" && meta.phone.trim() ? meta.phone.trim().slice(0, 30) : null;
+
+  // Ensure the profile exists and carries the name/phone from the form. The
+  // role is always 'customer' here, whatever the signup body says.
   await query(
-    `INSERT INTO profiles (id, email, full_name, role, created_at, updated_at)
-     VALUES ($1, $2, $3, 'customer', now(), now())
-     ON CONFLICT (id) DO NOTHING`,
-    [id, email, (meta.full_name as string) || email.split("@")[0]]
+    `INSERT INTO profiles (id, email, full_name, phone, role, created_at, updated_at)
+     VALUES ($1, $2, $3, $4, 'customer', now(), now())
+     ON CONFLICT (id) DO UPDATE SET
+       full_name = COALESCE(profiles.full_name, EXCLUDED.full_name),
+       phone = COALESCE(profiles.phone, EXCLUDED.phone)`,
+    [id, email, fullName.slice(0, 120), phone]
   ).catch(() => {});
 
   const { rows } = await query(`SELECT * FROM auth.users WHERE id = $1`, [id]);
@@ -240,6 +295,9 @@ export async function refreshSession(
     const userId = payload.sub;
     if (!userId || typeof userId !== "string") {
       return { session: null, error: "Invalid refresh token" };
+    }
+    if ((Number(payload.tv) || 0) !== (await currentTokenVersion(userId))) {
+      return { session: null, error: "Session has ended. Please sign in again." };
     }
     const { rows } = await query(
       `SELECT id, email, phone, encrypted_password, email_confirmed_at,
@@ -268,14 +326,22 @@ export async function updateUserPassword(
     `UPDATE auth.users SET encrypted_password = $1, updated_at = now() WHERE id = $2`,
     [hash, userId]
   );
+  await revokeSessions(userId);
   const user = await getUserById(userId);
   return { user, error: null };
 }
 
 export async function updateUserMetadata(
   userId: string,
-  data: Record<string, unknown>
+  rawData: Record<string, unknown>
 ): Promise<{ user: AuthUser | null; error: string | null }> {
+  // Only plain profile fields, capped in size.
+  const data: Record<string, unknown> = {};
+  for (const k of ["full_name", "first_name", "last_name", "phone", "newsletter", "avatar_url"]) {
+    const v = rawData?.[k];
+    if (typeof v === "string") data[k] = v.slice(0, 200);
+    else if (typeof v === "boolean") data[k] = v;
+  }
   await query(
     `UPDATE auth.users
      SET raw_user_meta_data = COALESCE(raw_user_meta_data, '{}'::jsonb) || $1::jsonb,
@@ -283,6 +349,10 @@ export async function updateUserMetadata(
      WHERE id = $2`,
     [JSON.stringify(data), userId]
   );
+  if (typeof data.full_name !== "string" && (typeof data.first_name === "string" || typeof data.last_name === "string")) {
+    const name = [data.first_name, data.last_name].filter((v) => typeof v === "string" && v.trim()).join(" ").trim();
+    if (name) data.full_name = name;
+  }
   if (typeof data.full_name === "string" || typeof data.phone === "string") {
     await query(
       `UPDATE profiles SET
@@ -299,4 +369,61 @@ export async function updateUserMetadata(
   }
   const user = await getUserById(userId);
   return { user, error: null };
+}
+
+// ---- password reset --------------------------------------------------------
+
+const RESET_TTL_MS = 60 * 60 * 1000; // 1 hour
+
+function hashToken(token: string): string {
+  return createHash("sha256").update(token).digest("hex");
+}
+
+/**
+ * Create a one-time reset token for this email. Returns null when there is no
+ * such account (callers must not reveal that to the visitor).
+ */
+export async function createPasswordResetToken(email: string): Promise<string | null> {
+  const normalized = email.trim().toLowerCase();
+  if (!normalized) return null;
+  const { rows } = await query<{ id: string }>(
+    `SELECT id FROM auth.users WHERE lower(email) = $1 AND deleted_at IS NULL LIMIT 1`,
+    [normalized]
+  );
+  if (!rows[0]) return null;
+  const token = randomBytes(32).toString("hex");
+  await query(
+    `UPDATE auth.users SET recovery_token = $1, recovery_sent_at = now(), updated_at = now() WHERE id = $2`,
+    [hashToken(token), rows[0].id]
+  );
+  return token;
+}
+
+export async function resetPasswordWithToken(
+  token: string,
+  password: string
+): Promise<{ ok: boolean; error: string | null }> {
+  if (!/^[a-f0-9]{64}$/.test(token)) return { ok: false, error: "This reset link is not valid." };
+  if (!password || password.length < 6) {
+    return { ok: false, error: "Password must be at least 6 characters" };
+  }
+  const { rows } = await query<{ id: string; recovery_sent_at: string | null }>(
+    `SELECT id, recovery_sent_at FROM auth.users
+     WHERE recovery_token = $1 AND deleted_at IS NULL LIMIT 1`,
+    [hashToken(token)]
+  );
+  const row = rows[0];
+  const sentAt = row?.recovery_sent_at ? new Date(row.recovery_sent_at).getTime() : 0;
+  if (!row || !sentAt || Date.now() - sentAt > RESET_TTL_MS) {
+    return { ok: false, error: "This reset link has expired. Please ask for a new one." };
+  }
+  const hash = bcrypt.hashSync(password, 10);
+  await query(
+    `UPDATE auth.users
+     SET encrypted_password = $1, recovery_token = '', recovery_sent_at = NULL, updated_at = now()
+     WHERE id = $2`,
+    [hash, row.id]
+  );
+  await revokeSessions(row.id);
+  return { ok: true, error: null };
 }

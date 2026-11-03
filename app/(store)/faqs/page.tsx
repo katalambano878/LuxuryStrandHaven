@@ -91,7 +91,7 @@ export default function FAQsPage() {
     {
       category: 'payment',
       question: 'Is it safe to use my credit card on your site?',
-      answer: 'Absolutely. We use industry-standard SSL encryption and partner with secure payment processors (Paystack, Flutterwave). We never store your full card details on our servers. All transactions are PCI-DSS compliant.'
+      answer: 'Absolutely. We use industry-standard SSL encryption and take payment through Moolre, a licensed Mobile Money provider. We never store your full card details on our servers. All transactions are PCI-DSS compliant.'
     },
     {
       category: 'payment',

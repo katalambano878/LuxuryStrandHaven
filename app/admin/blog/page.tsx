@@ -1,360 +1,308 @@
 ﻿'use client';
 
-import Link from 'next/link';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { supabase } from '@/lib/supabase';
+import ImageUpload from '@/components/admin/ImageUpload';
+
+const inputClass = 'w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-gray-600 focus:border-gray-600';
+
+type Post = {
+  id: string;
+  title: string;
+  slug: string;
+  excerpt: string | null;
+  content: string;
+  featured_image: string | null;
+  status: 'draft' | 'published' | 'archived';
+  published_at: string | null;
+  seo_title: string | null;
+  seo_description: string | null;
+  updated_at: string;
+};
+
+const emptyForm = {
+  title: '',
+  slug: '',
+  excerpt: '',
+  content: '',
+  featured_image: '',
+  status: 'draft' as Post['status'],
+  seo_title: '',
+  seo_description: '',
+};
+
+function slugify(text: string) {
+  return text
+    .toLowerCase()
+    .normalize('NFKD')
+    .replace(/[^\w\s-]/g, '')
+    .trim()
+    .replace(/[\s_-]+/g, '-')
+    .slice(0, 80);
+}
 
 export default function AdminBlogPage() {
-  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
-  const [selectedPosts, setSelectedPosts] = useState<number[]>([]);
+  const [posts, setPosts] = useState<Post[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [showEditor, setShowEditor] = useState(false);
+  const [form, setForm] = useState(emptyForm);
+  const [slugTouched, setSlugTouched] = useState(false);
+  const [saving, setSaving] = useState(false);
 
-  const posts = [
-    {
-      id: 1,
-      title: '10 Essential Tips for Creating a Minimalist Home',
-      slug: '10-essential-tips-minimalist-home',
-      author: 'Admin',
-      category: 'Interior Design',
-      image: 'https://placehold.co/400x400?text=Sample',
-      excerpt: 'Discover how to transform your living space into a serene minimalist haven with these practical tips...',
-      status: 'Published',
-      views: 2456,
-      comments: 23,
-      publishDate: 'Dec 15, 2024',
-      featured: true
-    },
-    {
-      id: 2,
-      title: 'The Art of Choosing Perfect Home Textiles',
-      slug: 'art-of-choosing-perfect-home-textiles',
-      author: 'Michael Chen',
-      category: 'Home Styling',
-      image: 'https://placehold.co/400x400?text=Sample',
-      excerpt: 'Learn the secrets to selecting textiles that elevate your home aesthetic and comfort...',
-      status: 'Published',
-      views: 1892,
-      comments: 18,
-      publishDate: 'Dec 10, 2024',
-      featured: true
-    },
-    {
-      id: 3,
-      title: 'Sustainable Living: Eco-Friendly Home Products Guide',
-      slug: 'sustainable-living-eco-friendly-guide',
-      author: 'Emma Williams',
-      category: 'Sustainability',
-      image: 'https://placehold.co/400x400?text=Sample',
-      excerpt: 'Make conscious choices for your home with our comprehensive guide to sustainable products...',
-      status: 'Published',
-      views: 3124,
-      comments: 31,
-      publishDate: 'Dec 5, 2024',
-      featured: true
-    },
-    {
-      id: 4,
-      title: 'Lighting Design: Creating Ambiance in Every Room',
-      slug: 'lighting-design-creating-ambiance',
-      author: 'David Martinez',
-      category: 'Interior Design',
-      image: 'https://placehold.co/400x400?text=Sample',
-      excerpt: 'Master the art of lighting to transform the mood and functionality of your spaces...',
-      status: 'Draft',
-      views: 0,
-      comments: 0,
-      publishDate: 'Dec 25, 2024',
-      featured: false
-    },
-    {
-      id: 5,
-      title: 'Gift Guide: Thoughtful Home Accessories',
-      slug: 'gift-guide-thoughtful-home-accessories',
-      author: 'Admin',
-      category: 'Gift Ideas',
-      image: 'https://placehold.co/400x400?text=Sample',
-      excerpt: 'Find the perfect gifts for home lovers with our carefully curated selection...',
-      status: 'Scheduled',
-      views: 0,
-      comments: 0,
-      publishDate: 'Dec 22, 2024',
-      featured: false
-    },
-    {
-      id: 6,
-      title: 'Color Psychology: Choosing the Right Palette',
-      slug: 'color-psychology-choosing-palette',
-      author: 'Michael Chen',
-      category: 'Home Styling',
-      image: 'https://placehold.co/400x400?text=Sample',
-      excerpt: 'Understand how colors affect mood and create the perfect atmosphere in your home...',
-      status: 'Published',
-      views: 1567,
-      comments: 14,
-      publishDate: 'Nov 28, 2024',
-      featured: false
+  async function loadPosts() {
+    setLoading(true);
+    const { data, error: loadError } = await supabase
+      .from('blog_posts')
+      .select('id, title, slug, excerpt, content, featured_image, status, published_at, seo_title, seo_description, updated_at')
+      .order('updated_at', { ascending: false });
+    if (loadError) setError(loadError.message);
+    setPosts((data as Post[]) || []);
+    setLoading(false);
+  }
+
+  useEffect(() => {
+    loadPosts();
+  }, []);
+
+  function openNew() {
+    setEditingId(null);
+    setForm(emptyForm);
+    setSlugTouched(false);
+    setError('');
+    setShowEditor(true);
+  }
+
+  function openEdit(post: Post) {
+    setEditingId(post.id);
+    setForm({
+      title: post.title,
+      slug: post.slug,
+      excerpt: post.excerpt || '',
+      content: post.content || '',
+      featured_image: post.featured_image || '',
+      status: post.status,
+      seo_title: post.seo_title || '',
+      seo_description: post.seo_description || '',
+    });
+    setSlugTouched(true);
+    setError('');
+    setShowEditor(true);
+  }
+
+  async function handleSave(e: React.FormEvent) {
+    e.preventDefault();
+    const slug = slugify(form.slug || form.title);
+    if (!form.title.trim() || !slug) {
+      setError('Add a title first.');
+      return;
     }
-  ];
-
-  const statusColors: any = {
-    'Published': 'bg-gray-100 text-gray-900',
-    'Draft': 'bg-gray-100 text-gray-700',
-    'Scheduled': 'bg-blue-100 text-blue-700'
-  };
-
-  const handleSelectAll = () => {
-    if (selectedPosts.length === posts.length) {
-      setSelectedPosts([]);
-    } else {
-      setSelectedPosts(posts.map(p => p.id));
+    if (!form.content.trim()) {
+      setError('Write the article before saving.');
+      return;
     }
-  };
-
-  const handleSelectPost = (postId: number) => {
-    if (selectedPosts.includes(postId)) {
-      setSelectedPosts(selectedPosts.filter(id => id !== postId));
-    } else {
-      setSelectedPosts([...selectedPosts, postId]);
+    setSaving(true);
+    setError('');
+    const existing = posts.find((p) => p.id === editingId);
+    const row = {
+      title: form.title.trim(),
+      slug,
+      excerpt: form.excerpt.trim() || null,
+      content: form.content,
+      featured_image: form.featured_image || null,
+      status: form.status,
+      seo_title: form.seo_title.trim() || null,
+      seo_description: form.seo_description.trim() || null,
+      // First publish stamps the date; later edits keep it.
+      published_at:
+        form.status === 'published' ? existing?.published_at || new Date().toISOString() : existing?.published_at || null,
+      updated_at: new Date().toISOString(),
+    };
+    const { error: saveError } = editingId
+      ? await supabase.from('blog_posts').update(row).eq('id', editingId)
+      : await supabase.from('blog_posts').insert(row);
+    setSaving(false);
+    if (saveError) {
+      setError(
+        /duplicate|unique/i.test(saveError.message)
+          ? 'Another article already uses this web address (slug). Change it and save again.'
+          : saveError.message
+      );
+      return;
     }
-  };
+    setShowEditor(false);
+    loadPosts();
+  }
+
+  async function handleDelete(post: Post) {
+    if (!confirm(`Delete "${post.title}"? This cannot be undone.`)) return;
+    const { error: deleteError } = await supabase.from('blog_posts').delete().eq('id', post.id);
+    if (deleteError) {
+      alert('Could not delete: ' + deleteError.message);
+      return;
+    }
+    loadPosts();
+  }
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900">Blog Posts</h1>
-          <p className="text-gray-600 mt-1">Create and manage your blog content</p>
+          <h1 className="text-3xl font-bold text-gray-900 mb-1">Blog</h1>
+          <p className="text-gray-600">Published articles appear on the public blog page.</p>
         </div>
-        <Link href="/admin/blog/new" className="bg-gray-900 hover:bg-gray-800 text-white px-6 py-3 rounded-lg font-semibold transition-colors whitespace-nowrap">
-          <i className="ri-add-line mr-2"></i>
-          New Post
-        </Link>
+        <button
+          type="button"
+          onClick={openNew}
+          className="inline-flex items-center justify-center gap-2 bg-gray-900 hover:bg-gray-800 text-white px-5 py-3 rounded-lg font-semibold"
+        >
+          <i className="ri-add-line"></i>
+          New article
+        </button>
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <div className="bg-white rounded-xl border-2 border-gray-200 p-4">
-          <p className="text-sm text-gray-600 mb-1">Total Posts</p>
-          <p className="text-2xl font-bold text-gray-900">{posts.length}</p>
-        </div>
-        <div className="bg-white rounded-xl border-2 border-gray-200 p-4">
-          <p className="text-sm text-gray-600 mb-1">Published</p>
-          <p className="text-2xl font-bold text-gray-900">{posts.filter(p => p.status === 'Published').length}</p>
-        </div>
-        <div className="bg-white rounded-xl border-2 border-gray-200 p-4">
-          <p className="text-sm text-gray-600 mb-1">Total Views</p>
-          <p className="text-2xl font-bold text-gray-900">{posts.reduce((sum, p) => sum + p.views, 0).toLocaleString()}</p>
-        </div>
-        <div className="bg-white rounded-xl border-2 border-gray-200 p-4">
-          <p className="text-sm text-gray-600 mb-1">Comments</p>
-          <p className="text-2xl font-bold text-blue-700">{posts.reduce((sum, p) => sum + p.comments, 0)}</p>
-        </div>
-      </div>
+      {error && !showEditor && <p className="text-sm text-red-600" role="alert">{error}</p>}
 
-      <div className="bg-white rounded-xl shadow-sm border border-gray-200">
-        <div className="p-6 border-b border-gray-200">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-3">
-              <select className="px-4 py-2 pr-8 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-gray-600 focus:border-gray-600 font-medium cursor-pointer">
-                <option>All Status</option>
-                <option>Published</option>
-                <option>Draft</option>
-                <option>Scheduled</option>
-              </select>
-              <select className="px-4 py-2 pr-8 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-gray-600 focus:border-gray-600 font-medium cursor-pointer">
-                <option>All Categories</option>
-                <option>Interior Design</option>
-                <option>Home Styling</option>
-                <option>Sustainability</option>
-                <option>Gift Ideas</option>
-              </select>
-              <select className="px-4 py-2 pr-8 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-gray-600 focus:border-gray-600 font-medium cursor-pointer">
-                <option>Sort by Date</option>
-                <option>Sort by Views</option>
-                <option>Sort by Comments</option>
-              </select>
-            </div>
-            <div className="flex border-2 border-gray-300 rounded-lg overflow-hidden">
-              <button
-                onClick={() => setViewMode('grid')}
-                className={`w-10 h-10 flex items-center justify-center transition-colors ${viewMode === 'grid' ? 'bg-gray-900 text-white' : 'bg-white text-gray-700 hover:bg-gray-50'
-                  }`}
-              >
-                <i className="ri-grid-line text-xl"></i>
-              </button>
-              <button
-                onClick={() => setViewMode('list')}
-                className={`w-10 h-10 flex items-center justify-center border-l-2 border-gray-300 transition-colors ${viewMode === 'list' ? 'bg-gray-900 text-white' : 'bg-white text-gray-700 hover:bg-gray-50'
-                  }`}
-              >
-                <i className="ri-list-check text-xl"></i>
-              </button>
-            </div>
-          </div>
-        </div>
-
-        {selectedPosts.length > 0 && (
-          <div className="p-4 bg-gray-50 border-b border-gray-200 flex items-center justify-between">
-            <p className="text-gray-800 font-semibold">
-              {selectedPosts.length} post{selectedPosts.length > 1 ? 's' : ''} selected
-            </p>
-            <div className="flex items-center space-x-2">
-              <button className="px-4 py-2 bg-gray-700 hover:bg-gray-900 text-white rounded-lg text-sm font-medium transition-colors whitespace-nowrap">
-                Publish
-              </button>
-              <button className="px-4 py-2 bg-gray-600 hover:bg-gray-700 text-white rounded-lg text-sm font-medium transition-colors whitespace-nowrap">
-                Draft
-              </button>
-              <button className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-sm font-medium transition-colors whitespace-nowrap">
-                Delete
-              </button>
-            </div>
-          </div>
-        )}
-
-        {viewMode === 'grid' ? (
-          <div className="p-6 grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {posts.map((post) => (
-              <div key={post.id} className="border-2 border-gray-200 rounded-xl overflow-hidden hover:shadow-lg transition-shadow">
-                <div className="relative">
-                  <input
-                    type="checkbox"
-                    checked={selectedPosts.includes(post.id)}
-                    onChange={() => handleSelectPost(post.id)}
-                    className="absolute top-3 left-3 w-5 h-5 text-gray-900 border-gray-300 rounded focus:ring-gray-600 cursor-pointer z-10"
-                  />
-                  <div className="aspect-video bg-gray-100 overflow-hidden">
-                    <img src={post.image} alt={post.title} className="w-full h-full object-cover" />
-                  </div>
-                  {post.featured && (
-                    <span className="absolute top-3 right-3 bg-amber-500 text-white px-3 py-1 rounded-full text-xs font-semibold whitespace-nowrap">
-                      Featured
-                    </span>
-                  )}
-                </div>
-                <div className="p-4">
-                  <div className="flex items-center justify-between mb-3">
-                    <span className="text-xs font-semibold text-gray-900">{post.category}</span>
-                    <span className={`px-2 py-1 rounded-full text-xs font-semibold ${statusColors[post.status]}`}>
-                      {post.status}
-                    </span>
-                  </div>
-                  <h3 className="font-bold text-gray-900 mb-2 line-clamp-2">{post.title}</h3>
-                  <p className="text-sm text-gray-600 mb-3 line-clamp-2">{post.excerpt}</p>
-                  <div className="flex items-center justify-between text-sm text-gray-600 mb-4 pb-4 border-b border-gray-200">
-                    <span className="flex items-center">
-                      <i className="ri-eye-line mr-1"></i>
-                      {post.views}
-                    </span>
-                    <span className="flex items-center">
-                      <i className="ri-chat-3-line mr-1"></i>
-                      {post.comments}
-                    </span>
-                    <span className="whitespace-nowrap">{post.publishDate}</span>
-                  </div>
-                  <div className="flex items-center space-x-2">
-                    <Link
-                      href={`/admin/blog/${post.id}`}
-                      className="flex-1 bg-gray-900 hover:bg-gray-800 text-white py-2 rounded-lg text-sm font-medium text-center transition-colors whitespace-nowrap"
-                    >
-                      Edit Post
-                    </Link>
-                    <button className="w-9 h-9 flex items-center justify-center border-2 border-gray-300 text-gray-700 hover:border-blue-600 hover:text-blue-600 rounded-lg transition-colors">
-                      <i className="ri-eye-line"></i>
-                    </button>
-                  </div>
-                </div>
-              </div>
-            ))}
+      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+        {loading ? (
+          <p className="p-8 text-center text-gray-500">Loading articles…</p>
+        ) : posts.length === 0 ? (
+          <div className="p-12 text-center">
+            <i className="ri-article-line text-4xl text-gray-300 block mb-3"></i>
+            <p className="text-gray-600">No articles yet. Write your first one.</p>
           </div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead className="bg-gray-50 border-b border-gray-200">
-                <tr>
-                  <th className="py-4 px-6">
-                    <input
-                      type="checkbox"
-                      checked={selectedPosts.length === posts.length}
-                      onChange={handleSelectAll}
-                      className="w-4 h-4 text-gray-900 border-gray-300 rounded focus:ring-gray-600 cursor-pointer"
-                    />
-                  </th>
-                  <th className="text-left py-4 px-4 text-sm font-semibold text-gray-700">Post</th>
-                  <th className="text-left py-4 px-4 text-sm font-semibold text-gray-700">Author</th>
-                  <th className="text-left py-4 px-4 text-sm font-semibold text-gray-700">Category</th>
-                  <th className="text-left py-4 px-4 text-sm font-semibold text-gray-700">Views</th>
-                  <th className="text-left py-4 px-4 text-sm font-semibold text-gray-700">Comments</th>
-                  <th className="text-left py-4 px-4 text-sm font-semibold text-gray-700">Status</th>
-                  <th className="text-left py-4 px-4 text-sm font-semibold text-gray-700">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {posts.map((post) => (
-                  <tr key={post.id} className="border-b border-gray-100 hover:bg-gray-50 transition-colors">
-                    <td className="py-4 px-6">
-                      <input
-                        type="checkbox"
-                        checked={selectedPosts.includes(post.id)}
-                        onChange={() => handleSelectPost(post.id)}
-                        className="w-4 h-4 text-gray-900 border-gray-300 rounded focus:ring-gray-600 cursor-pointer"
-                      />
-                    </td>
-                    <td className="py-4 px-4">
-                      <div className="flex items-center space-x-3">
-                        <div className="w-20 h-14 bg-gray-100 rounded-lg overflow-hidden">
-                          <img src={post.image} alt={post.title} className="w-full h-full object-cover" />
-                        </div>
-                        <div>
-                          <Link href={`/admin/blog/${post.id}`} className="font-semibold text-gray-900 hover:text-gray-900">
-                            {post.title}
-                          </Link>
-                          <p className="text-sm text-gray-500 mt-1">{post.publishDate}</p>
-                        </div>
-                      </div>
-                    </td>
-                    <td className="py-4 px-4 text-gray-700">{post.author}</td>
-                    <td className="py-4 px-4 text-gray-700">{post.category}</td>
-                    <td className="py-4 px-4 font-semibold text-gray-900">{post.views}</td>
-                    <td className="py-4 px-4 font-semibold text-gray-900">{post.comments}</td>
-                    <td className="py-4 px-4">
-                      <span className={`px-3 py-1 rounded-full text-xs font-semibold whitespace-nowrap ${statusColors[post.status]}`}>
-                        {post.status}
-                      </span>
-                    </td>
-                    <td className="py-4 px-4">
-                      <div className="flex items-center space-x-2">
-                        <Link
-                          href={`/admin/blog/${post.id}`}
-                          className="w-8 h-8 flex items-center justify-center text-gray-600 hover:text-blue-700 hover:bg-blue-50 rounded-lg transition-colors"
-                        >
-                          <i className="ri-edit-line text-lg"></i>
-                        </Link>
-                        <button className="w-8 h-8 flex items-center justify-center text-gray-600 hover:text-gray-900 hover:bg-gray-50 rounded-lg transition-colors">
-                          <i className="ri-eye-line text-lg"></i>
-                        </button>
-                        <button className="w-8 h-8 flex items-center justify-center text-gray-600 hover:text-red-700 hover:bg-red-50 rounded-lg transition-colors">
-                          <i className="ri-delete-bin-line text-lg"></i>
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <ul className="divide-y divide-gray-100">
+            {posts.map((post) => (
+              <li key={post.id} className="flex flex-col sm:flex-row sm:items-center gap-3 p-4">
+                <div className="w-full sm:w-20 h-32 sm:h-14 rounded-lg bg-gray-100 overflow-hidden shrink-0">
+                  {post.featured_image && <img src={post.featured_image} alt="" className="w-full h-full object-cover" />}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="font-semibold text-gray-900 truncate">{post.title}</p>
+                  <p className="text-xs text-gray-500">
+                    /blog/{post.slug} · updated {new Date(post.updated_at).toLocaleDateString('en-GB')}
+                  </p>
+                </div>
+                <span
+                  className={`self-start sm:self-center text-xs font-semibold px-2.5 py-1 rounded-full ${
+                    post.status === 'published' ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-700'
+                  }`}
+                >
+                  {post.status === 'published' ? 'Published' : post.status === 'archived' ? 'Archived' : 'Draft'}
+                </span>
+                <div className="flex gap-2">
+                  {post.status === 'published' && (
+                    <a
+                      href={`/blog/${post.slug}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="px-3 py-2 text-sm rounded-lg border border-gray-300 hover:border-gray-500"
+                    >
+                      View
+                    </a>
+                  )}
+                  <button type="button" onClick={() => openEdit(post)} className="px-3 py-2 text-sm rounded-lg border border-gray-300 hover:border-gray-500">
+                    Edit
+                  </button>
+                  <button type="button" onClick={() => handleDelete(post)} className="px-3 py-2 text-sm rounded-lg border border-red-200 text-red-700 hover:border-red-400">
+                    Delete
+                  </button>
+                </div>
+              </li>
+            ))}
+          </ul>
         )}
-
-        <div className="p-6 border-t border-gray-200 flex items-center justify-between">
-          <p className="text-gray-600">Showing {posts.length} posts</p>
-          <div className="flex items-center space-x-2">
-            <button className="w-10 h-10 flex items-center justify-center border-2 border-gray-300 rounded-lg hover:border-gray-400 transition-colors">
-              <i className="ri-arrow-left-s-line text-xl text-gray-600"></i>
-            </button>
-            <button className="w-10 h-10 flex items-center justify-center bg-gray-900 text-white rounded-lg font-semibold">1</button>
-            <button className="w-10 h-10 flex items-center justify-center border-2 border-gray-300 rounded-lg hover:border-gray-400 transition-colors">
-              <i className="ri-arrow-right-s-line text-xl text-gray-600"></i>
-            </button>
-          </div>
-        </div>
       </div>
+
+      {showEditor && (
+        <div className="fixed inset-0 z-50 bg-black/50 flex items-start justify-center overflow-y-auto p-4" role="dialog" aria-modal="true" aria-labelledby="blog-editor-title">
+          <form onSubmit={handleSave} className="bg-white rounded-2xl w-full max-w-3xl my-8 p-6 space-y-5">
+            <div className="flex items-center justify-between">
+              <h2 id="blog-editor-title" className="text-xl font-bold text-gray-900">{editingId ? 'Edit article' : 'New article'}</h2>
+              <button type="button" onClick={() => setShowEditor(false)} aria-label="Close" className="w-9 h-9 rounded-lg hover:bg-gray-100">
+                <i className="ri-close-line text-xl"></i>
+              </button>
+            </div>
+
+            <div>
+              <label htmlFor="post-title" className="block text-sm font-semibold text-gray-900 mb-1">Title</label>
+              <input
+                id="post-title"
+                className={inputClass}
+                value={form.title}
+                onChange={(e) => {
+                  const title = e.target.value;
+                  setForm((f) => ({ ...f, title, slug: slugTouched ? f.slug : slugify(title) }));
+                }}
+              />
+            </div>
+            <div>
+              <label htmlFor="post-slug" className="block text-sm font-semibold text-gray-900 mb-1">Web address</label>
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-gray-500">/blog/</span>
+                <input
+                  id="post-slug"
+                  className={inputClass}
+                  value={form.slug}
+                  onChange={(e) => {
+                    setSlugTouched(true);
+                    setForm((f) => ({ ...f, slug: e.target.value }));
+                  }}
+                  onBlur={() => setForm((f) => ({ ...f, slug: slugify(f.slug) }))}
+                />
+              </div>
+            </div>
+            <div>
+              <label htmlFor="post-excerpt" className="block text-sm font-semibold text-gray-900 mb-1">Short summary</label>
+              <textarea id="post-excerpt" rows={2} className={inputClass} value={form.excerpt} onChange={(e) => setForm((f) => ({ ...f, excerpt: e.target.value }))} />
+            </div>
+            <ImageUpload
+              label="Cover image"
+              value={form.featured_image}
+              onChange={(url) => setForm((f) => ({ ...f, featured_image: url }))}
+              bucket="media"
+              folder="blog"
+              accept="image/jpeg,image/png,image/webp"
+            />
+            <div>
+              <label htmlFor="post-content" className="block text-sm font-semibold text-gray-900 mb-1">Article</label>
+              <p className="text-xs text-gray-500 mb-2">Plain text or simple HTML (headings, bold, links, lists, images).</p>
+              <textarea id="post-content" rows={14} className={`${inputClass} font-mono text-sm`} value={form.content} onChange={(e) => setForm((f) => ({ ...f, content: e.target.value }))} />
+            </div>
+            <div className="grid sm:grid-cols-2 gap-4">
+              <div>
+                <label htmlFor="post-seo-title" className="block text-sm font-semibold text-gray-900 mb-1">Search title (optional)</label>
+                <input id="post-seo-title" className={inputClass} value={form.seo_title} onChange={(e) => setForm((f) => ({ ...f, seo_title: e.target.value }))} />
+              </div>
+              <div>
+                <label htmlFor="post-status" className="block text-sm font-semibold text-gray-900 mb-1">Status</label>
+                <select id="post-status" className={inputClass} value={form.status} onChange={(e) => setForm((f) => ({ ...f, status: e.target.value as Post['status'] }))}>
+                  <option value="draft">Draft (hidden)</option>
+                  <option value="published">Published</option>
+                  <option value="archived">Archived (hidden)</option>
+                </select>
+              </div>
+            </div>
+            <div>
+              <label htmlFor="post-seo-desc" className="block text-sm font-semibold text-gray-900 mb-1">Search description (optional)</label>
+              <textarea id="post-seo-desc" rows={2} className={inputClass} value={form.seo_description} onChange={(e) => setForm((f) => ({ ...f, seo_description: e.target.value }))} />
+            </div>
+
+            {error && <p className="text-sm text-red-600" role="alert">{error}</p>}
+
+            <div className="flex justify-end gap-3 pt-2">
+              <button type="button" onClick={() => setShowEditor(false)} className="px-5 py-2.5 rounded-lg border border-gray-300">
+                Cancel
+              </button>
+              <button type="submit" disabled={saving} className="px-5 py-2.5 rounded-lg bg-gray-900 text-white font-semibold disabled:opacity-60">
+                {saving ? 'Saving…' : 'Save article'}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
     </div>
   );
 }

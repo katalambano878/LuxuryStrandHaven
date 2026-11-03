@@ -63,7 +63,9 @@ export default function LoginPage() {
 
       if (data.session) {
         persistAccessCookie(data.session.access_token, data.session.expires_in);
-        router.push('/account');
+        // Go back where the shopper came from (e.g. checkout), same-site paths only.
+        const next = new URLSearchParams(window.location.search).get('redirect') || '';
+        router.push(next.startsWith('/') && !next.startsWith('//') && !next.startsWith('/\\') ? next : '/account');
         router.refresh();
       } else {
         setAuthError('Sign in did not start a session. Please try again.');
@@ -95,7 +97,7 @@ export default function LoginPage() {
               <p className="text-lg font-medium leading-relaxed">
                 "Beauty is an attitude. It's about how you carry yourself and how you present yourself to the world."
               </p>
-              <footer className="text-sm text-gray-300">— The Prishane Philosophy</footer>
+              <footer className="text-sm text-gray-300">— Luxury Strand Haven</footer>
             </blockquote>
           </div>
         </div>

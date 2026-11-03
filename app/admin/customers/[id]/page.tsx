@@ -16,28 +16,51 @@ export default function CustomerDetailsPage() {
 
     const fetchCustomerData = useCallback(async () => {
         try {
-            // 1. Fetch Profile
-            const { data: profile, error: profileError } = await supabase
-                .from('profiles')
-                .select('*')
-                .eq('id', customerId)
-                .single();
+            // The list links three kinds of IDs: CRM customers (customers.id),
+            // registered users (profiles.id) and guests ("guest-<n>-<email>").
+            const id = decodeURIComponent(customerId);
+            const isUuid = /^[0-9a-f-]{36}$/i.test(id);
+            let found: any = null;
 
-            if (profileError) throw profileError;
+            if (isUuid) {
+                const { data: crm } = await supabase.from('customers').select('*').eq('id', id).maybeSingle();
+                if (crm) {
+                    found = {
+                        ...crm,
+                        full_name: crm.full_name || [crm.first_name, crm.last_name].filter(Boolean).join(' ') || null,
+                    };
+                } else {
+                    const { data: profile } = await supabase.from('profiles').select('*').eq('id', id).maybeSingle();
+                    if (profile) found = { ...profile, user_id: profile.id };
+                }
+            } else if (id.startsWith('guest-')) {
+                const email = id.split('-').slice(2).join('-');
+                if (email) found = { email, full_name: null, phone: null, user_id: null };
+            }
 
-            // 2. Fetch Orders
+            if (!found) {
+                setCustomer(null);
+                return;
+            }
+
+            const filters = [found.user_id ? `user_id.eq.${found.user_id}` : '', found.email ? `email.eq.${found.email}` : '']
+                .filter(Boolean)
+                .join(',');
             const { data: ordersData, error: ordersError } = await supabase
                 .from('orders')
                 .select('*')
-                .eq('user_id', customerId)
+                .or(filters)
                 .order('created_at', { ascending: false });
+            if (ordersError) console.error('Error fetching orders:', ordersError.message);
 
-            if (ordersError && ordersError.code !== 'PGRST116') { // Ignore not found if simply no orders? No, select returns empty array usually
-                // Actually select returns empty array if no match, not error.
+            const list = ordersData || [];
+            if (!found.full_name && list[0]) {
+                const ship = list[0].shipping_address || {};
+                found.full_name = ship.full_name || [ship.firstName, ship.lastName].filter(Boolean).join(' ') || null;
+                found.phone = found.phone || list[0].phone || ship.phone || null;
             }
-
-            setCustomer(profile);
-            setOrders(ordersData || []);
+            setCustomer(found);
+            setOrders(list);
         } catch (err) {
             console.error('Error fetching customer:', err);
         } finally {
@@ -54,7 +77,8 @@ export default function CustomerDetailsPage() {
     if (loading) return <div className="p-8 text-center text-gray-500">Loading customer details...</div>;
     if (!customer) return <div className="p-8 text-center text-red-500">Customer not found</div>;
 
-    const totalSpent = orders.reduce((sum, order) => sum + (order.total || 0), 0);
+    // Only paid orders count as money spent.
+    const totalSpent = orders.filter((o) => o.payment_status === 'paid').reduce((sum, order) => sum + (Number(order.total) || 0), 0);
 
     return (
         <div className="max-w-7xl mx-auto">
@@ -65,7 +89,7 @@ export default function CustomerDetailsPage() {
                         <i className="ri-arrow-left-line text-xl"></i>
                     </Link>
                     <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center text-gray-700 text-2xl font-bold">
-                        {customer.full_name?.charAt(0) || customer.email.charAt(0).toUpperCase()}
+                        {(customer.full_name || customer.email || '?').charAt(0).toUpperCase()}
                     </div>
                     <div>
                         <h1 className="text-3xl font-bold text-gray-900">{customer.full_name || 'No Name'}</h1>
@@ -73,13 +97,18 @@ export default function CustomerDetailsPage() {
                     </div>
                 </div>
                 <div className="flex space-x-3">
-                    <button className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 font-medium hover:bg-gray-50 cursor-pointer">
-                        <i className="ri-mail-send-line mr-2"></i>
-                        Send Email
-                    </button>
-                    <button className="px-4 py-2 bg-gray-600 text-white rounded-lg font-bold hover:bg-gray-700 cursor-pointer">
-                        Edit Customer
-                    </button>
+                    {customer.email && (
+                        <a href={`mailto:${customer.email}`} className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 font-medium hover:bg-gray-50">
+                            <i className="ri-mail-send-line mr-2"></i>
+                            Send Email
+                        </a>
+                    )}
+                    {customer.phone && (
+                        <a href={`tel:${customer.phone}`} className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 font-medium hover:bg-gray-50">
+                            <i className="ri-phone-line mr-2"></i>
+                            Call
+                        </a>
+                    )}
                 </div>
             </div>
 

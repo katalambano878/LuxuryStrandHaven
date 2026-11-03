@@ -99,6 +99,10 @@ export async function middleware(request: NextRequest) {
   response.headers.set('X-Content-Type-Options', 'nosniff');
   response.headers.set('X-Frame-Options', 'DENY');
   response.headers.set('Referrer-Policy', 'strict-origin-when-cross-origin');
+  response.headers.set('Permissions-Policy', 'camera=(), microphone=(), geolocation=(self), payment=()');
+  if (request.nextUrl.protocol === 'https:' || request.headers.get('x-forwarded-proto') === 'https') {
+    response.headers.set('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  }
 
   if (pathname.startsWith('/admin')) {
     response.headers.set('X-Robots-Tag', 'noindex, nofollow');
@@ -163,10 +167,17 @@ export async function middleware(request: NextRequest) {
         response.headers.set('x-user-role', profile.role);
       } catch (err) {
         console.error('[Middleware] Auth check error:', err);
+        const loginUrl = new URL('/admin/login', request.url);
+        loginUrl.searchParams.set('error', 'session_expired');
+        return NextResponse.redirect(loginUrl);
       }
+      return response;
     }
 
-    return response;
+    // No way to check the session: fail closed.
+    const loginUrl = new URL('/admin/login', request.url);
+    loginUrl.searchParams.set('redirect', pathname);
+    return NextResponse.redirect(loginUrl);
   }
 
   if (
@@ -187,7 +198,10 @@ export async function middleware(request: NextRequest) {
 
   const inMaintenance = await isMaintenanceModeEnabled();
   if (inMaintenance) {
-    const isAdmin = request.cookies.get('admin_session')?.value === '1';
+    // Staff can still browse the store; the check uses the signed session,
+    // not a cookie anyone could set.
+    const token = extractToken(request);
+    const isAdmin = !!token && usePlainPg && (await verifyPlainPgAdmin(token)).ok;
     if (!isAdmin) {
       return NextResponse.redirect(new URL('/maintenance', request.url));
     }

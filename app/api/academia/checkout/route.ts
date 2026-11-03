@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
+import { randomInt } from "crypto";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { checkRateLimit, getClientIdentifier, RATE_LIMITS } from "@/lib/rate-limit";
+import { appBaseUrl, createMoolreLink, moolreConfigured } from "@/lib/moolre";
 
 export const dynamic = "force-dynamic";
 
@@ -50,11 +52,11 @@ export async function POST(req: Request) {
       return NextResponse.json({ success: true, free: true, url: classUrl });
     }
 
-    if (!process.env.MOOLRE_API_USER || !process.env.MOOLRE_API_PUBKEY || !process.env.MOOLRE_ACCOUNT_NUMBER) {
+    if (!moolreConfigured()) {
       return NextResponse.json({ success: false, message: "Payment is not configured." }, { status: 500 });
     }
 
-    const orderNumber = `CLS-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+    const orderNumber = `CLS-${Date.now()}-${randomInt(100000, 1000000)}`;
     const address = {
       full_name: name,
       email,
@@ -114,43 +116,18 @@ export async function POST(req: Request) {
       return NextResponse.json({ success: false, message: "Could not start checkout." }, { status: 500 });
     }
 
-    const baseUrl = (process.env.NEXT_PUBLIC_APP_URL || new URL(req.url).origin).replace(/\/+$/, "");
-    const payload = {
-      type: 1,
-      amount: price.toString(),
-      email: process.env.MOOLRE_MERCHANT_EMAIL || email,
-      externalref: `${orderNumber}-R${Date.now()}`,
-      callback: `${baseUrl}/api/payment/moolre/callback`,
-      redirect: `${baseUrl}/academia/join?order=${encodeURIComponent(orderNumber)}&payment_success=true`,
-      reusable: "0",
-      currency: "GHS",
-      accountnumber: process.env.MOOLRE_ACCOUNT_NUMBER,
-      metadata: {
-        customer_email: email,
-        original_order_number: orderNumber,
-        course_id: course.id,
-      },
-    };
-
-    const response = await fetch("https://api.moolre.com/embed/link", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-API-USER": process.env.MOOLRE_API_USER,
-        "X-API-PUBKEY": process.env.MOOLRE_API_PUBKEY,
-      },
-      body: JSON.stringify(payload),
-    });
-    const result = await response.json();
-
-    if (result.status === 1 && result.data?.authorization_url) {
-      return NextResponse.json({ success: true, url: result.data.authorization_url });
-    }
-
-    return NextResponse.json(
-      { success: false, message: result.message || "Could not open the payment page." },
-      { status: 400 }
+    const link = await createMoolreLink(
+      { ...order, total: price, email, payment_status: "pending", metadata: null },
+      {
+        baseUrl: appBaseUrl(req),
+        redirectPath: `/academia/join?order=${encodeURIComponent(orderNumber)}&payment_success=true`,
+        customerEmail: email,
+      }
     );
+    if ("error" in link) {
+      return NextResponse.json({ success: false, message: link.error }, { status: 502 });
+    }
+    return NextResponse.json({ success: true, url: link.url });
   } catch (error) {
     console.error("[Academia checkout]", error);
     return NextResponse.json({ success: false, message: "Could not start payment." }, { status: 500 });

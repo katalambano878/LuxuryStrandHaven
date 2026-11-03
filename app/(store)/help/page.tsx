@@ -2,8 +2,6 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import Header from '@/components/Header';
-import Footer from '@/components/Footer';
 
 const categories = [
   {
@@ -112,7 +110,6 @@ export default function HelpCenterPage() {
 
   return (
     <>
-      <Header />
       <main className="min-h-screen bg-gray-50">
         <div className="bg-gradient-to-br from-gray-900 to-gray-900 text-white py-16">
           <div className="max-w-4xl mx-auto px-4 text-center">
@@ -275,7 +272,6 @@ export default function HelpCenterPage() {
           </div>
         </div>
       </main>
-      <Footer />
     </>
   );
 }

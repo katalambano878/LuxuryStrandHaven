@@ -84,7 +84,7 @@ export default function POSPage() {
                     price: p.price,
                     quantity: p.quantity,
                     category: p.categories?.name || 'Uncategorized',
-                    image: p.product_images?.[0]?.url || 'https://via.placeholder.com/150',
+                    image: p.product_images?.[0]?.url || '/placeholder-product.svg',
                     sku: p.sku
                 }));
                 setProducts(formatted);
@@ -99,7 +99,7 @@ export default function POSPage() {
                 .from('customers')
                 .select('id, full_name, email, phone')
                 .order('full_name')
-                .limit(200);
+                .limit(5000);
 
             if (custData) setCustomers(custData);
 
@@ -301,7 +301,11 @@ export default function POSPage() {
                 .from('order_items')
                 .insert(orderItems);
 
-            if (itemsError) throw itemsError;
+            if (itemsError) {
+                // Don't leave an order with no items behind.
+                await supabase.from('orders').delete().eq('id', order.id);
+                throw itemsError;
+            }
 
             // 3. Upsert Customer Record (email is required in customers table)
             const hasRealEmail = customerEmail && customerEmail !== 'pos-walkin@store.local';
@@ -313,7 +317,7 @@ export default function POSPage() {
 
             if (upsertEmail) {
                 try {
-                    await supabase.rpc('upsert_customer_from_order', {
+                    const { error: custRpcErr } = await supabase.rpc('upsert_customer_from_order', {
                         p_email: upsertEmail,
                         p_phone: customerPhone || null,
                         p_full_name: customerName || null,
@@ -322,8 +326,9 @@ export default function POSPage() {
                         p_user_id: null,
                         p_address: addressData
                     });
+                    if (custRpcErr) console.error('Customer upsert error (non-fatal):', custRpcErr.message);
                     // Refresh customer list silently
-                    supabase.from('customers').select('id, full_name, email, phone').order('full_name').limit(200)
+                    supabase.from('customers').select('id, full_name, email, phone').order('full_name').limit(5000)
                         .then(({ data }) => { if (data) setCustomers(data); });
                 } catch (custErr) {
                     console.error('Customer upsert error (non-fatal):', custErr);
@@ -333,13 +338,13 @@ export default function POSPage() {
             // 4. If Cash or Card — mark as paid, reduce stock
             if (isCashOrCard) {
                 // Call mark_order_paid to reduce stock (uses order_number as order_ref)
-                try {
-                    await supabase.rpc('mark_order_paid', {
-                        order_ref: orderNumber,
-                        moolre_ref: `POS-${paymentMethod.toUpperCase()}-${Date.now()}`
-                    });
-                } catch (stockErr) {
-                    console.error('Stock reduction error (non-fatal):', stockErr);
+                // supabase-js returns errors instead of throwing, so check the result.
+                const { error: paidErr } = await supabase.rpc('mark_order_paid', {
+                    order_ref: orderNumber,
+                    moolre_ref: `POS-${paymentMethod.toUpperCase()}-${Date.now()}`
+                });
+                if (paidErr) {
+                    alert(`Sale saved, but stock was not reduced: ${paidErr.message}. Please adjust stock in Inventory.`);
                 }
 
                 // Success — show completed

@@ -29,7 +29,7 @@ export default function ProductForm({ initialData, isEditMode = false }: Product
     const [moq, setMoq] = useState(initialData?.moq || '1');
     const [lowStockThreshold, setLowStockThreshold] = useState(initialData?.metadata?.low_stock_threshold || '5');
     const [description, setDescription] = useState(initialData?.description || '');
-    const [status, setStatus] = useState(initialData?.status || 'Active');
+    const [status, setStatus] = useState(String(initialData?.status || 'active').toLowerCase());
     const [featured, setFeatured] = useState(initialData?.featured || false);
     const [preorderShipping, setPreorderShipping] = useState(initialData?.metadata?.preorder_shipping || '');
     const [activeTab, setActiveTab] = useState('general');
@@ -283,11 +283,13 @@ export default function ProductForm({ initialData, isEditMode = false }: Product
                 const walk = (nodes: CatNode[], depth: number) => { nodes.forEach(n => { flat.push({ id: n.id, name: n.name, depth }); walk(n.children, depth + 1); }); };
                 walk(roots, 0);
                 setCategories(flat);
-                if (flat.length > 0 && !categoryId) setCategoryId(flat[0].id);
+                if (flat.length > 0 && !initialData?.category_id && !initialData?.id) setCategoryId((current: string) => current || flat[0].id);
             }
         }
         fetchCategories();
-    }, [categoryId]);
+        // Load the list once; re-running on every category change reset the choice.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
 
     // Auto-generate slug from name if not manually edited
     useEffect(() => {
@@ -427,15 +429,16 @@ export default function ProductForm({ initialData, isEditMode = false }: Product
 
             if (error) throw error;
 
-            // Update Images & category links
+            // Update images, category links and variants. Every step checks its
+            // result, so a failure is reported instead of a false "saved".
             if (productId) {
-                // Strategy: We will just delete all old images/variants and recreate them for simplicity in this MVP.
-                // In a clearer implementation, we would diff them.
-
-                // 1. Images
-                if (isEditMode) {
-                    await supabase.from('product_images').delete().eq('product_id', productId);
-                }
+                // 1. Images: add the new set first, then remove the old rows, so a
+                //    failed insert never leaves the product without images.
+                const { data: oldImages, error: oldImgErr } = await supabase
+                    .from('product_images')
+                    .select('id')
+                    .eq('product_id', productId);
+                if (oldImgErr) throw oldImgErr;
                 if (images.length > 0) {
                     const imageInserts = images.map((img, idx) => ({
                         product_id: productId,
@@ -443,32 +446,47 @@ export default function ProductForm({ initialData, isEditMode = false }: Product
                         position: idx,
                         alt_text: productName
                     }));
-                    await supabase.from('product_images').insert(imageInserts);
+                    const { error: imgErr } = await supabase.from('product_images').insert(imageInserts);
+                    if (imgErr) throw new Error(`Images were not saved: ${imgErr.message}`);
+                }
+                const oldImageIds = (oldImages || []).map((r: any) => r.id);
+                if (oldImageIds.length > 0) {
+                    const { error: delImgErr } = await supabase.from('product_images').delete().in('id', oldImageIds);
+                    if (delImgErr) throw new Error(`Old images could not be removed: ${delImgErr.message}`);
                 }
 
                 // 2. Category links (extra categories)
                 {
                     const { error: delErr } = await supabase.from('product_category_links').delete().eq('product_id', productId);
-                    if (delErr) console.error('Error clearing category links:', delErr);
+                    if (delErr) throw new Error(`Categories were not saved: ${delErr.message}`);
                     const linkIds = extraCategoryIds.filter(id => id && id !== categoryId);
                     if (linkIds.length > 0) {
                         const linkRows = linkIds.map(id => ({ product_id: productId, category_id: id, is_primary: false }));
                         const { error: linkErr } = await supabase.from('product_category_links').insert(linkRows);
-                        if (linkErr) console.error('Error saving category links:', linkErr);
+                        if (linkErr) throw new Error(`Categories were not saved: ${linkErr.message}`);
                     }
                 }
 
-                // 3. Variants
-                if (isEditMode) {
-                    // Be careful not to delete ALL variants if we want to preserve IDs etc, 
-                    // but for now, full replacement is safer to ensure sync.
-                    // Note: This might break order-item references if they rely on variant_id hard constraints without cascading.
-                    // Our Schema migration has ON DELETE SET NULL for order_items -> variant_id, so this is safe for now (but distinct from "archiving").
-                    await supabase.from('product_variants').delete().eq('product_id', productId);
-                }
+                // 3. Variants: update matching rows in place (orders point at them),
+                //    add new ones, and remove the rest. Products whose variants were
+                //    not set up in this editor (no saved option names) are left alone,
+                //    so saving them never wipes their variants.
+                const formManagesVariants =
+                    variants.length > 0 || (initialData?.metadata?.option_names || []).length > 0;
+                const { data: existingRows, error: exErr } = !formManagesVariants
+                    ? { data: [] as any[], error: null }
+                    : await supabase
+                    .from('product_variants')
+                    .select('id, option1, option2, option3')
+                    .eq('product_id', productId);
+                if (exErr) throw exErr;
+                const keyOf = (o1?: string | null, o2?: string | null, o3?: string | null) =>
+                    [o1 || '', o2 || '', o3 || ''].join('|||');
+                const existingByKey = new Map((existingRows || []).map((r: any) => [keyOf(r.option1, r.option2, r.option3), r.id]));
+                const keep = new Set<string>();
 
-                if (variants.length > 0) {
-                    const variantInserts = variants.map(v => ({
+                for (const v of variants) {
+                    const row = {
                         product_id: productId,
                         name: v.values.join(' / ') || 'Default',
                         sku: v.sku || null,
@@ -478,10 +496,30 @@ export default function ProductForm({ initialData, isEditMode = false }: Product
                         option1: v.values[0] || null,
                         option2: v.values[1] || null,
                         option3: v.values[2] || null,
-                        metadata: {},
-                    }));
-                    const { error: varError } = await supabase.from('product_variants').insert(variantInserts);
-                    if (varError) throw varError;
+                    };
+                    const existingId = existingByKey.get(keyOf(row.option1, row.option2, row.option3));
+                    if (existingId) {
+                        keep.add(existingId);
+                        const { error: upErr } = await supabase.from('product_variants').update(row).eq('id', existingId);
+                        if (upErr) throw new Error(`Option "${row.name}" was not saved: ${upErr.message}`);
+                    } else {
+                        const { error: insErr } = await supabase.from('product_variants').insert({ ...row, metadata: {} });
+                        if (insErr) throw new Error(`Option "${row.name}" was not saved: ${insErr.message}`);
+                    }
+                }
+
+                const removeIds = (existingRows || []).map((r: any) => r.id).filter((id: string) => !keep.has(id));
+                for (const id of removeIds) {
+                    const { error: delVarErr } = await supabase.from('product_variants').delete().eq('id', id);
+                    if (delVarErr) {
+                        // Past orders point at this option. They keep its name as text,
+                        // so unlink them and delete the option.
+                        const { error: unlinkErr } = await supabase.from('order_items').update({ variant_id: null }).eq('variant_id', id);
+                        if (unlinkErr) throw new Error(`An old option could not be removed: ${unlinkErr.message}`);
+                        await supabase.from('cart_items').delete().eq('variant_id', id);
+                        const { error: retryErr } = await supabase.from('product_variants').delete().eq('id', id);
+                        if (retryErr) throw new Error(`An old option could not be removed: ${retryErr.message}`);
+                    }
                 }
             }
 
@@ -658,9 +696,9 @@ export default function ProductForm({ initialData, isEditMode = false }: Product
                                         onChange={(e) => setStatus(e.target.value)}
                                         className="w-full px-4 py-3 pr-8 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-gray-600 focus:border-gray-600 cursor-pointer"
                                     >
-                                        <option>Active</option>
-                                        <option>Draft</option>
-                                        <option>Archived</option>
+                                        <option value="active">Active</option>
+                                        <option value="draft">Draft</option>
+                                        <option value="archived">Archived</option>
                                     </select>
                                 </div>
                             </div>
@@ -1245,7 +1283,7 @@ export default function ProductForm({ initialData, isEditMode = false }: Product
                                     <span className="text-sm font-semibold text-center px-2">{uploading ? 'Uploading...' : 'Image or Video'}</span>
                                     <input
                                         type="file"
-                                        accept="image/*,video/mp4,video/webm,video/ogg,video/quicktime,video/x-msvideo"
+                                        accept="image/jpeg,image/png,image/webp,image/gif,image/avif,video/mp4,video/webm,video/ogg,video/quicktime,video/x-msvideo"
                                         className="hidden"
                                         onChange={handleImageUpload}
                                         disabled={uploading}

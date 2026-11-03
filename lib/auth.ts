@@ -66,3 +66,13 @@ export async function verifyAuth(
     return { authenticated: false, error: message };
   }
 }
+
+/** Admin/staff check for server actions, which receive no Request object. */
+export async function verifyAdminToken(token: string | null | undefined): Promise<boolean> {
+  if (!token) return false;
+  const auth = await verifyAuth(
+    new Request('http://internal/', { headers: { authorization: `Bearer ${token}` } }),
+    { requireAdmin: true }
+  );
+  return auth.authenticated;
+}

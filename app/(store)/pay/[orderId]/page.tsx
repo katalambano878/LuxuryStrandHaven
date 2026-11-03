@@ -15,7 +15,6 @@ export default function PaymentPage() {
   const [order, setOrder] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [processing, setProcessing] = useState(false);
-  const [paymentMethod, setPaymentMethod] = useState<'paystack' | 'moolre' | 'stripe' | 'paypal'>('paystack');
   const [error, setError] = useState<string | null>(null);
   const [storeName, setStoreName] = useState('Luxury Strand Haven');
 
@@ -27,10 +26,11 @@ export default function PaymentPage() {
     async function fetchOrder() {
       try {
         // Fetch order by ID (UUID) or order_number
+        const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(orderId);
         let query = supabase
           .from('orders')
           .select('*')
-          .or(`id.eq.${orderId},order_number.eq.${orderId}`)
+          .eq(isUuid ? 'id' : 'order_number', orderId)
           .single();
 
         const { data, error: fetchError } = await query;
@@ -68,14 +68,13 @@ export default function PaymentPage() {
     setProcessing(true);
     setError(null);
 
-    const url = paymentMethod === 'paystack' ? '/api/payment/paystack' : paymentMethod === 'moolre' ? '/api/payment/moolre' : paymentMethod === 'stripe' ? '/api/payment/stripe' : '/api/payment/paypal';
+    const url = '/api/payment/moolre';
     try {
       const paymentRes = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           orderId: order.order_number,
-          amount: order.total,
           customerEmail: order.email,
         }),
       });
@@ -206,54 +205,15 @@ export default function PaymentPage() {
           </div>
         )}
 
-        {/* Payment method choice - all 4 options in one card */}
+        {/* Payment method */}
         <div className="mb-6 bg-white rounded-xl shadow-sm p-6">
-          <h2 className="text-base font-bold text-gray-900 mb-4">Choose payment method</h2>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <button
-              type="button"
-              onClick={() => setPaymentMethod('paystack')}
-              className={`flex items-center gap-4 p-4 rounded-xl border-2 text-left transition-colors cursor-pointer ${paymentMethod === 'paystack' ? 'border-gray-900 bg-gray-50' : 'border-gray-200 hover:border-gray-300'}`}
-            >
-              <i className="ri-bank-card-line text-2xl text-gray-700 flex-shrink-0"></i>
-              <div>
-                <span className="font-semibold text-gray-900 block">Paystack</span>
-                <span className="text-xs text-gray-600">Card & Mobile Money</span>
-              </div>
-            </button>
-            <button
-              type="button"
-              onClick={() => setPaymentMethod('moolre')}
-              className={`flex items-center gap-4 p-4 rounded-xl border-2 text-left transition-colors cursor-pointer ${paymentMethod === 'moolre' ? 'border-gray-900 bg-gray-50' : 'border-gray-200 hover:border-gray-300'}`}
-            >
-              <i className="ri-smartphone-line text-2xl text-gray-700 flex-shrink-0"></i>
-              <div>
-                <span className="font-semibold text-gray-900 block">Moolre</span>
-                <span className="text-xs text-gray-600">Mobile Money</span>
-              </div>
-            </button>
-            <button
-              type="button"
-              onClick={() => setPaymentMethod('stripe')}
-              className={`flex items-center gap-4 p-4 rounded-xl border-2 text-left transition-colors cursor-pointer ${paymentMethod === 'stripe' ? 'border-gray-900 bg-gray-50' : 'border-gray-200 hover:border-gray-300'}`}
-            >
-              <i className="ri-bank-card-2-line text-2xl text-gray-700 flex-shrink-0"></i>
-              <div>
-                <span className="font-semibold text-gray-900 block">Stripe</span>
-                <span className="text-xs text-gray-600">Card (Visa, Mastercard)</span>
-              </div>
-            </button>
-            <button
-              type="button"
-              onClick={() => setPaymentMethod('paypal')}
-              className={`flex items-center gap-4 p-4 rounded-xl border-2 text-left transition-colors cursor-pointer ${paymentMethod === 'paypal' ? 'border-gray-900 bg-gray-50' : 'border-gray-200 hover:border-gray-300'}`}
-            >
-              <i className="ri-paypal-line text-2xl text-gray-700 flex-shrink-0"></i>
-              <div>
-                <span className="font-semibold text-gray-900 block">PayPal</span>
-                <span className="text-xs text-gray-600">PayPal balance</span>
-              </div>
-            </button>
+          <h2 className="text-base font-bold text-gray-900 mb-4">Payment method</h2>
+          <div className="flex items-center gap-4 p-4 rounded-xl border-2 border-gray-900 bg-gray-50">
+            <i className="ri-smartphone-line text-2xl text-gray-700 flex-shrink-0"></i>
+            <div>
+              <span className="font-semibold text-gray-900 block">Mobile Money</span>
+              <span className="text-xs text-gray-600">MTN, Vodafone, AirtelTigo</span>
+            </div>
           </div>
         </div>
 
@@ -274,7 +234,7 @@ export default function PaymentPage() {
           ) : (
             <>
               <i className="ri-secure-payment-line mr-2"></i>
-              Pay GH₵ {order?.total?.toFixed(2)} with {paymentMethod === 'paystack' ? 'Paystack' : paymentMethod === 'moolre' ? 'Moolre' : paymentMethod === 'stripe' ? 'Stripe' : 'PayPal'}
+              Pay GH₵ {order?.total?.toFixed(2)} with Mobile Money
             </>
           )}
         </button>
@@ -283,7 +243,7 @@ export default function PaymentPage() {
         <div className="mt-6 text-center">
           <p className="text-xs text-gray-500 flex items-center justify-center">
             <i className="ri-lock-line mr-1"></i>
-            Secure payment · Paystack, Moolre, Stripe & PayPal
+            Secure Mobile Money payment
           </p>
         </div>
 

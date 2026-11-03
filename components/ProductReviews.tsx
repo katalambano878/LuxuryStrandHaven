@@ -125,14 +125,12 @@ export default function ProductReviews({ productId }: ProductReviewsProps) {
         user_id: user.id,
         rating: reviewForm.rating,
         title: reviewForm.title,
-        content: reviewForm.content,
-        status: 'approved', // Auto-approve for demo
-        verified_purchase: false // We could check orders here but keeping it simple
+        content: reviewForm.content
       }]);
 
       if (error) throw error;
 
-      alert('Review submitted successfully!');
+      alert('Thank you! Your review will appear once the store has checked it.');
       setShowReviewForm(false);
       setReviewForm({ rating: 5, title: '', content: '' });
       invalidateCache(`reviews:${productId}`); // Clear cache so fresh data is fetched

@@ -68,7 +68,6 @@ export default function AdminLayout({
       setIsAuthenticated(true);
       setIsLoading(false);
       persistAccessCookie(session.access_token, session.expires_in);
-      document.cookie = 'admin_session=1; path=/; max-age=86400; SameSite=Lax';
     }
 
     checkAuth();
@@ -142,10 +141,11 @@ export default function AdminLayout({
     const next = !maintenanceEnabled;
     setMaintenanceToggling(true);
     try {
-      await supabase.from('store_settings').upsert(
+      const { error } = await supabase.from('store_settings').upsert(
         { key: 'maintenance_mode', value: next ? 'true' : 'false', updated_at: new Date().toISOString() },
         { onConflict: 'key' }
       );
+      if (error) throw error;
       setMaintenanceEnabled(next);
     } catch (err) {
       console.error('Failed to toggle maintenance:', err);

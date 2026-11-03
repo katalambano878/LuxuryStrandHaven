@@ -120,8 +120,9 @@ export default function CustomerInsightsPage() {
 
 
   const filteredCustomers = customers.filter(customer => {
-    const matchesSearch = customer.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      customer.email.toLowerCase().includes(searchTerm.toLowerCase());
+    const term = searchTerm.toLowerCase();
+    const matchesSearch = (customer.name || '').toLowerCase().includes(term) ||
+      (customer.email || '').toLowerCase().includes(term);
     const matchesSegment = selectedSegment === 'all' || customer.segment === selectedSegment;
     return matchesSearch && matchesSegment;
   });

@@ -1,151 +1,74 @@
 import { NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase-admin';
 import { sendOrderConfirmation } from '@/lib/notifications';
+import { checkRateLimit, getClientIdentifier, RATE_LIMITS } from '@/lib/rate-limit';
+import { ORDER_REF, confirmMoolrePayment } from '@/lib/moolre';
 
 /**
- * Payment verification endpoint.
- * Called from the order-success page after the user completes payment on Moolre.
- * 
- * Moolre redirects the user to our success page ONLY after payment succeeds.
- * The redirect URL contains payment_success=true which we set in the payment request.
- * Since only Moolre controls this redirect, the redirect itself is proof of payment.
- * 
- * We also try to verify with Moolre's API as an extra check.
+ * Payment verification endpoint, called from the order-success and class
+ * join pages after the customer comes back from Moolre.
+ *
+ * The redirect itself proves nothing (anyone can open that URL), so the order
+ * is only marked paid when Moolre's status API confirms the transaction.
  */
 export async function POST(req: Request) {
     try {
-        const { orderNumber, fromRedirect } = await req.json();
-
-        if (!orderNumber) {
-            return NextResponse.json({ success: false, message: 'Missing orderNumber' }, { status: 400 });
+        const clientId = getClientIdentifier(req);
+        const rateLimitResult = checkRateLimit(`verify:${clientId}`, RATE_LIMITS.payment);
+        if (!rateLimitResult.success) {
+            return NextResponse.json({ success: false, message: 'Too many requests' }, { status: 429 });
         }
 
-        console.log('[Verify] Checking payment for:', orderNumber, '| fromRedirect:', fromRedirect);
+        const { orderNumber } = await req.json().catch(() => ({}));
 
-        // 1. Check current order status
-        const { data: order, error: fetchError } = await supabaseAdmin
-            .from('orders')
-            .select('id, order_number, payment_status, status, total, email, phone, shipping_address, metadata')
-            .eq('order_number', orderNumber)
-            .single();
+        if (!orderNumber || typeof orderNumber !== 'string' || !ORDER_REF.test(orderNumber)) {
+            return NextResponse.json({ success: false, message: 'Missing or invalid orderNumber' }, { status: 400 });
+        }
 
-        if (fetchError || !order) {
-            console.error('[Verify] Order not found:', orderNumber);
+        const result = await confirmMoolrePayment(orderNumber);
+        if (!result.order) {
             return NextResponse.json({ success: false, message: 'Order not found' }, { status: 404 });
         }
 
-        // Already paid - no action needed
-        if (order.payment_status === 'paid') {
-            console.log('[Verify] Order already paid:', orderNumber);
-            return NextResponse.json({ 
-                success: true, 
-                status: order.status,
-                payment_status: order.payment_status,
-                message: 'Order already paid' 
+        if (!result.paid) {
+            return NextResponse.json({
+                success: false,
+                status: result.order.status,
+                payment_status: result.order.payment_status,
+                message: 'Payment not yet confirmed by the payment provider',
             });
         }
 
-        // 2. Verify payment method is moolre
-        if (order.metadata?.payment_method !== 'moolre' && order.metadata?.payment_method !== undefined) {
-            // Not a moolre payment - don't auto-verify
+        if (result.justPaid) {
+            await afterPaid(result.order);
         }
 
-        // 3. Try to verify with Moolre's API first
-        let moolreApiVerified = false;
-        
-        if (process.env.MOOLRE_API_USER && process.env.MOOLRE_API_PUBKEY) {
-            try {
-                // Try the embed/status endpoint
-                const checkResponse = await fetch('https://api.moolre.com/embed/status', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-API-USER': process.env.MOOLRE_API_USER,
-                        'X-API-PUBKEY': process.env.MOOLRE_API_PUBKEY
-                    },
-                    body: JSON.stringify({ externalref: orderNumber })
-                });
-
-                const checkResult = await checkResponse.json();
-                console.log('[Verify] Moolre API response:', JSON.stringify(checkResult));
-                
-                const statusStr = String(checkResult.data?.status || '').toLowerCase();
-                moolreApiVerified = 
-                    statusStr === 'success' || 
-                    statusStr === 'successful' || 
-                    statusStr === 'completed' || 
-                    statusStr === 'paid' ||
-                    (checkResult.status === 1 && checkResult.data);
-                    
-            } catch (moolreError: any) {
-                console.warn('[Verify] Moolre API check failed:', moolreError.message);
-            }
-        }
-
-        // 4. Determine if we should mark as paid
-        // Trust the redirect from Moolre as proof of payment.
-        // Moolre only redirects to our success URL (with payment_success=true) after payment completes.
-        // The redirect URL is set by us in the payment request, so only Moolre can trigger it.
-        const shouldMarkPaid = moolreApiVerified || fromRedirect === true;
-
-        if (!shouldMarkPaid) {
-            console.log('[Verify] Cannot verify payment for:', orderNumber);
-            return NextResponse.json({ 
-                success: false, 
-                status: order.status,
-                payment_status: order.payment_status,
-                message: 'Payment not yet confirmed' 
-            });
-        }
-
-        const verifySource = moolreApiVerified ? 'moolre-api' : 'redirect-verification';
-        console.log('[Verify] Marking order paid via:', verifySource, 'for:', orderNumber);
-
-        // 5. Mark as paid
-        const { data: orderJson, error: updateError } = await supabaseAdmin
-            .rpc('mark_order_paid', {
-                order_ref: orderNumber,
-                moolre_ref: verifySource
-            });
-
-        if (updateError) {
-            console.error('[Verify] RPC Error:', updateError.message);
-            return NextResponse.json({ success: false, message: 'Failed to update order' }, { status: 500 });
-        }
-
-        console.log('[Verify] Order marked as paid:', orderNumber);
-
-        // 6. Update customer stats
-        if (orderJson?.email) {
-            try {
-                await supabaseAdmin.rpc('update_customer_stats', {
-                    p_customer_email: orderJson.email,
-                    p_order_total: orderJson.total
-                });
-            } catch (statsError: any) {
-                console.error('[Verify] Customer stats failed:', statsError.message);
-            }
-        }
-
-        // 7. Send notifications (SMS + Email)
-        if (orderJson) {
-            try {
-                await sendOrderConfirmation(orderJson);
-                console.log('[Verify] Notifications sent for:', orderNumber);
-            } catch (notifyError: any) {
-                console.error('[Verify] Notification failed:', notifyError.message);
-            }
-        }
-
-        return NextResponse.json({ 
-            success: true, 
-            status: 'processing',
+        return NextResponse.json({
+            success: true,
+            status: result.order.status || 'processing',
             payment_status: 'paid',
-            message: 'Payment verified and order updated' 
+            message: 'Payment verified',
         });
-
     } catch (error: any) {
         console.error('[Verify] Error:', error.message);
         return NextResponse.json({ success: false, message: 'Internal error' }, { status: 500 });
+    }
+}
+
+async function afterPaid(order: any) {
+    if (order?.email) {
+        try {
+            await supabaseAdmin.rpc('update_customer_stats', {
+                p_customer_email: order.email,
+                p_order_total: order.total
+            });
+        } catch (statsError: any) {
+            console.error('[Verify] Customer stats failed:', statsError.message);
+        }
+    }
+    try {
+        await sendOrderConfirmation(order);
+    } catch (notifyError: any) {
+        console.error('[Verify] Notification failed:', notifyError.message);
     }
 }

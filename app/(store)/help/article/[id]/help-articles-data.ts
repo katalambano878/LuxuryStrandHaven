@@ -57,7 +57,7 @@ export const getArticles = (contactPhone: string, contactEmail: string) => ({
       
       <h3>Step 1: Start Your Return</h3>
       <ol>
-        <li>Go to the <a href="/returns">Returns Portal</a></li>
+        <li>Send us a <a href="/contact?subject=Return%20request">return request</a></li>
         <li>Enter your order number and email</li>
         <li>Select the items you want to return</li>
         <li>Choose a return reason</li>

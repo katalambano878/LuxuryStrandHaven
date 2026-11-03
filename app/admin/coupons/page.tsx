@@ -24,11 +24,12 @@ export default function AdminCouponsPage() {
         setCoupons(data.map((c: any) => ({
           id: c.id,
           code: c.code,
-          type: c.discount_type || 'Percentage', // Adjust key if needed (e.g. type)
-          value: c.discount_value || c.value || 0,
-          minPurchase: c.min_purchase_amount || 0,
+          // discount_type enum: percentage | fixed_amount | free_shipping
+          type: c.type === 'fixed_amount' ? 'Fixed Amount' : c.type === 'free_shipping' ? 'Free Shipping' : 'Percentage',
+          value: Number(c.value) || 0,
+          minPurchase: Number(c.minimum_purchase) || 0,
           usageLimit: c.usage_limit || null,
-          usedCount: c.times_used || 0,
+          usedCount: c.usage_count || 0,
           startDate: c.start_date ? new Date(c.start_date).toLocaleDateString() : 'N/A',
           endDate: c.end_date ? new Date(c.end_date).toLocaleDateString() : null,
           status: isCouponActive(c) ? 'Active' : 'Expired' // Derive status
@@ -83,7 +84,7 @@ export default function AdminCouponsPage() {
         </button>
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
         <div className="bg-white rounded-xl border-2 border-gray-200 p-4">
           <p className="text-sm text-gray-600 mb-1">Total Coupons</p>
           <p className="text-2xl font-bold text-gray-900">{coupons.length}</p>
@@ -95,10 +96,6 @@ export default function AdminCouponsPage() {
         <div className="bg-white rounded-xl border-2 border-gray-200 p-4">
           <p className="text-sm text-gray-600 mb-1">Total Uses</p>
           <p className="text-2xl font-bold text-gray-900">{totalUses}</p>
-        </div>
-        <div className="bg-white rounded-xl border-2 border-gray-200 p-4">
-          <p className="text-sm text-gray-600 mb-1">Total Discount</p>
-          <p className="text-2xl font-bold text-purple-700">--</p>
         </div>
       </div>
 
@@ -147,7 +144,12 @@ export default function AdminCouponsPage() {
                     <td className="py-4 px-6">
                       <div className="flex items-center space-x-2">
                         <span className="font-mono font-bold text-gray-900 bg-gray-100 px-3 py-1 rounded">{coupon.code}</span>
-                        <button className="w-7 h-7 flex items-center justify-center text-gray-400 hover:text-gray-900 hover:bg-gray-50 rounded transition-colors cursor-pointer">
+                        <button
+                          type="button"
+                          aria-label={`Copy ${coupon.code}`}
+                          onClick={() => navigator.clipboard?.writeText(coupon.code)}
+                          className="w-7 h-7 flex items-center justify-center text-gray-400 hover:text-gray-900 hover:bg-gray-50 rounded transition-colors cursor-pointer"
+                        >
                           <i className="ri-file-copy-line"></i>
                         </button>
                       </div>
@@ -191,7 +193,17 @@ export default function AdminCouponsPage() {
                         >
                           <i className="ri-edit-line text-lg"></i>
                         </button>
-                        <button className="w-8 h-8 flex items-center justify-center text-gray-600 hover:text-red-700 hover:bg-red-50 rounded-lg transition-colors cursor-pointer">
+                        <button
+                          type="button"
+                          aria-label={`Delete ${coupon.code}`}
+                          onClick={async () => {
+                            if (!confirm(`Delete coupon ${coupon.code}?`)) return;
+                            const { error } = await supabase.from('coupons').delete().eq('id', coupon.id);
+                            if (error) alert('Could not delete coupon: ' + error.message);
+                            else fetchCoupons();
+                          }}
+                          className="w-8 h-8 flex items-center justify-center text-gray-600 hover:text-red-700 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
+                        >
                           <i className="ri-delete-bin-line text-lg"></i>
                         </button>
                       </div>
@@ -209,7 +221,9 @@ export default function AdminCouponsPage() {
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white p-8 rounded-lg max-w-lg w-full">
             <h2 className="text-xl font-bold mb-4">Manage Coupon</h2>
-            <p className="text-gray-600 mb-6">Coupon management functionality coming soon.</p>
+            <p className="text-gray-600 mb-6">
+              Checkout does not accept coupon codes yet, so new coupons can&apos;t be created here. Existing coupons are listed for reference.
+            </p>
             <button
               onClick={() => { setShowAddModal(false); setShowEditModal(false); }}
               className="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300"

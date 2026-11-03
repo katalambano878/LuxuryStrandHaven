@@ -43,3 +43,6 @@ migration-artifacts/dumps/
 migration-artifacts/storage/
 
 .env.staging
+
+# TypeScript incremental build cache
+*.tsbuildinfo

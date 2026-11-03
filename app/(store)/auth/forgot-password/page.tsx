@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useState } from 'react';
 import { useRecaptcha } from '@/hooks/useRecaptcha';
+import { supabase } from '@/lib/supabase';
 
 export default function ForgotPasswordPage() {
   const [email, setEmail] = useState('');
@@ -35,10 +36,20 @@ export default function ForgotPasswordPage() {
       return;
     }
 
-    setTimeout(() => {
-      setIsLoading(false);
+    try {
+      const { error: resetError } = await supabase.auth.resetPasswordForEmail(email.trim(), {
+        redirectTo: `${window.location.origin}/auth/reset-password`,
+      });
+      if (resetError) {
+        setError(resetError.message || 'Could not send the reset link. Please try again.');
+        return;
+      }
       setIsSubmitted(true);
-    }, 1500);
+    } catch {
+      setError('Could not send the reset link. Please check your connection and try again.');
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   if (isSubmitted) {
@@ -51,7 +62,7 @@ export default function ForgotPasswordPage() {
             </div>
             <h1 className="text-2xl font-bold text-gray-900 mb-3">Check Your Email</h1>
             <p className="text-gray-600 mb-6">
-              We've sent a password reset link to <strong>{email}</strong>
+              If an account exists for <strong>{email}</strong>, we've sent it a password reset link.
             </p>
             <p className="text-sm text-gray-500 mb-8">
               If you don't receive an email within a few minutes, please check your spam folder.
@@ -79,11 +90,13 @@ export default function ForgotPasswordPage() {
         <div className="bg-white rounded-xl shadow-sm p-8">
           <form onSubmit={handleSubmit} className="space-y-6">
             <div>
-              <label className="block text-sm font-semibold text-gray-900 mb-2">
+              <label htmlFor="reset-email" className="block text-sm font-semibold text-gray-900 mb-2">
                 Email Address
               </label>
               <input
+                id="reset-email"
                 type="email"
+                autoComplete="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 className={`w-full px-4 py-3 border-2 rounded-lg focus:ring-2 focus:ring-gray-600 focus:border-gray-600 ${

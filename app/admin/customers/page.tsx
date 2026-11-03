@@ -4,6 +4,31 @@ import Link from 'next/link';
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { supabase } from '@/lib/supabase';
 
+function csvCell(value: unknown): string {
+  let text = String(value ?? '');
+  // Stop spreadsheet apps from running customer-typed text as a formula.
+  if (/^[=+\-@\t\r]/.test(text)) text = `'${text}`;
+  return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+}
+
+function exportCustomersCsv(rows: any[]) {
+  if (rows.length === 0) {
+    alert('No customers to export.');
+    return;
+  }
+  const header = ['Name', 'Email', 'Phone', 'Orders', 'Total spent (GHS)', 'Joined', 'Last order', 'Status'];
+  const lines = rows.map((c) =>
+    [c.name, c.email, c.phone, c.orders, Number(c.totalSpent || 0).toFixed(2), c.joined, c.lastOrder, c.status].map(csvCell).join(',')
+  );
+  const blob = new Blob([[header.join(','), ...lines].join('\n')], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `customers-${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 export default function AdminCustomersPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCustomers, setSelectedCustomers] = useState<string[]>([]);
@@ -280,7 +305,11 @@ export default function AdminCustomersPage() {
           <h1 className="text-3xl font-bold text-gray-900">Customers</h1>
           <p className="text-gray-600 mt-1">Manage your customer base and relationships</p>
         </div>
-        <button className="bg-gray-900 hover:bg-gray-800 text-white px-6 py-3 rounded-lg font-semibold transition-colors whitespace-nowrap cursor-pointer">
+        <button
+          type="button"
+          onClick={() => exportCustomersCsv(filteredCustomers)}
+          className="bg-gray-900 hover:bg-gray-800 text-white px-6 py-3 rounded-lg font-semibold transition-colors whitespace-nowrap cursor-pointer"
+        >
           <i className="ri-download-line mr-2"></i>
           Export Customers
         </button>
@@ -353,15 +382,23 @@ export default function AdminCustomersPage() {
               {selectedCustomers.length} customer{selectedCustomers.length > 1 ? 's' : ''} selected
             </p>
             <div className="flex items-center space-x-2">
-              <button className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium transition-colors whitespace-nowrap cursor-pointer">
+              <a
+                href={`mailto:?bcc=${encodeURIComponent(
+                  filteredCustomers
+                    .filter((c) => selectedCustomers.includes(c.id) && c.email)
+                    .map((c) => c.email)
+                    .join(',')
+                )}`}
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium transition-colors whitespace-nowrap"
+              >
                 <i className="ri-mail-line mr-2"></i>
                 Send Email
-              </button>
-              <button className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg text-sm font-medium transition-colors whitespace-nowrap cursor-pointer">
-                <i className="ri-vip-crown-line mr-2"></i>
-                Mark as VIP
-              </button>
-              <button className="px-4 py-2 bg-gray-700 hover:bg-gray-800 text-white rounded-lg text-sm font-medium transition-colors whitespace-nowrap cursor-pointer">
+              </a>
+              <button
+                type="button"
+                onClick={() => exportCustomersCsv(filteredCustomers.filter((c) => selectedCustomers.includes(c.id)))}
+                className="px-4 py-2 bg-gray-700 hover:bg-gray-800 text-white rounded-lg text-sm font-medium transition-colors whitespace-nowrap cursor-pointer"
+              >
                 <i className="ri-download-line mr-2"></i>
                 Export
               </button>
@@ -446,12 +483,15 @@ export default function AdminCustomersPage() {
                         >
                           <i className="ri-eye-line text-lg"></i>
                         </Link>
-                        <button className="w-8 h-8 flex items-center justify-center text-gray-600 hover:text-blue-700 hover:bg-blue-50 rounded-lg transition-colors cursor-pointer">
-                          <i className="ri-mail-line text-lg"></i>
-                        </button>
-                        <button className="w-8 h-8 flex items-center justify-center text-gray-600 hover:text-red-700 hover:bg-red-50 rounded-lg transition-colors cursor-pointer">
-                          <i className="ri-delete-bin-line text-lg"></i>
-                        </button>
+                        {customer.email && (
+                          <a
+                            href={`mailto:${customer.email}`}
+                            aria-label={`Email ${customer.name}`}
+                            className="w-8 h-8 flex items-center justify-center text-gray-600 hover:text-blue-700 hover:bg-blue-50 rounded-lg transition-colors"
+                          >
+                            <i className="ri-mail-line text-lg"></i>
+                          </a>
+                        )}
                       </div>
                     </td>
                   </tr>

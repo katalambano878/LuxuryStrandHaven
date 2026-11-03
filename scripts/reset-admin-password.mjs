@@ -4,8 +4,13 @@
  */
 const url = process.env.NEXT_PUBLIC_SUPABASE_URL?.replace(/\/$/, '');
 const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-const userId = process.env.RESET_USER_ID || '4b056ca3-0111-4d25-8062-6f633c44dbc2';
-const newPassword = process.env.RESET_PASSWORD || 'Admin123!';
+const userId = process.env.RESET_USER_ID;
+const newPassword = process.env.RESET_PASSWORD;
+
+if (!userId || !newPassword || newPassword.length < 12) {
+  console.error('Set RESET_USER_ID and RESET_PASSWORD (at least 12 characters).');
+  process.exit(1);
+}
 
 if (!url || !serviceRoleKey) {
   console.error('Missing NEXT_PUBLIC_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY');

@@ -31,6 +31,14 @@ export default function OrderDetailClient({ orderId }: OrderDetailClientProps) {
     window.print();
   };
 
+  // The orders list opens "/admin/orders/<id>?print=true" for invoices.
+  useEffect(() => {
+    if (!loading && order && new URLSearchParams(window.location.search).get('print') === 'true') {
+      const t = setTimeout(() => window.print(), 300);
+      return () => clearTimeout(t);
+    }
+  }, [loading, order]);
+
   // Inject print styles
   useEffect(() => {
     const styleId = 'order-print-styles';

@@ -4,7 +4,6 @@ import { useState, useEffect, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import OrderHistory from './OrderHistory';
-import AddressBook from './AddressBook';
 import { supabase } from '@/lib/supabase';
 import { clearAccessCookie } from '@/lib/auth-session';
 
@@ -20,7 +19,7 @@ function AccountContent() {
   // Update active tab when URL param changes
   useEffect(() => {
     const tab = searchParams.get('tab');
-    if (tab && ['profile', 'orders', 'addresses', 'security'].includes(tab)) {
+    if (tab && ['profile', 'orders', 'security'].includes(tab)) {
       setActiveTab(tab);
     }
   }, [searchParams]);
@@ -56,7 +55,7 @@ function AccountContent() {
         firstName: session.user.user_metadata?.first_name || '',
         lastName: session.user.user_metadata?.last_name || '',
         email: session.user.email || '',
-        phone: session.user.phone || ''
+        phone: session.user.user_metadata?.phone || session.user.phone || ''
       });
       setLoading(false);
     }
@@ -73,7 +72,7 @@ function AccountContent() {
         data: {
           first_name: profileData.firstName,
           last_name: profileData.lastName,
-          phone: profileData.phone // Storing phone in metadata for now
+          phone: profileData.phone
         }
       });
 
@@ -105,8 +104,12 @@ function AccountContent() {
         password: passwordData.password
       });
       if (error) throw error;
-      setPasswordMessage({ type: 'success', text: 'Password updated successfully!' });
+      // Changing the password signs out every device, this one included.
+      setPasswordMessage({ type: 'success', text: 'Password updated. Please sign in again with your new password.' });
       setPasswordData({ password: '', confirmPassword: '' });
+      clearAccessCookie();
+      await supabase.auth.signOut({ scope: 'local' });
+      setTimeout(() => router.push('/auth/login'), 1500);
     } catch (err: any) {
       setPasswordMessage({ type: 'error', text: err.message });
     } finally {
@@ -128,38 +131,6 @@ function AccountContent() {
       </div>
     );
   }
-
-  const quickActions = [
-    {
-      icon: 'ri-medal-line',
-      title: 'Loyalty Program',
-      description: 'Earn points and rewards',
-      link: '/loyalty'
-    },
-    {
-      icon: 'ri-user-add-line',
-      title: 'Refer & Earn',
-      description: 'Invite friends and earn rewards',
-      link: '/referral'
-    }
-  ];
-
-  const securityOptions = [
-    {
-      icon: 'ri-mail-check-line',
-      title: 'Verify Email',
-      description: user?.email,
-      status: user?.email_confirmed_at ? 'verified' : 'unverified',
-      link: '#' // /account/verify-email
-    },
-    {
-      icon: 'ri-phone-line',
-      title: 'Verify Phone',
-      description: user?.phone || 'No phone added',
-      status: user?.phone_confirmed_at ? 'verified' : 'unverified',
-      link: '#' // /account/verify-phone
-    }
-  ];
 
   return (
     <>
@@ -194,7 +165,6 @@ function AccountContent() {
                   {[
                     { id: 'profile', icon: 'ri-user-settings-line', label: 'Profile Settings' },
                     { id: 'orders', icon: 'ri-shopping-bag-3-line', label: 'Order History' },
-                    { id: 'addresses', icon: 'ri-map-pin-2-line', label: 'Addresses' },
                     { id: 'security', icon: 'ri-shield-keyhole-line', label: 'Security' }
                   ].map(tab => (
                     <button
@@ -219,7 +189,6 @@ function AccountContent() {
                 {[
                   { id: 'profile', icon: 'ri-user-settings-line', label: 'Profile' },
                   { id: 'orders', icon: 'ri-shopping-bag-3-line', label: 'Orders' },
-                  { id: 'addresses', icon: 'ri-map-pin-2-line', label: 'Address' },
                   { id: 'security', icon: 'ri-shield-keyhole-line', label: 'Security' }
                 ].map(tab => (
                   <button
@@ -365,42 +334,42 @@ function AccountContent() {
 
                 {activeTab === 'orders' && <OrderHistory />}
 
-                {activeTab === 'addresses' && <AddressBook />}
 
                 {activeTab === 'security' && (
                   <div>
                     <h2 className="text-2xl font-bold text-gray-900 mb-6">Security Settings</h2>
-                    <div className="grid md:grid-cols-2 gap-4">
-                      {securityOptions.map((option, index) => (
-                        <Link
-                          key={index}
-                          href={option.link}
-                          className="flex items-center justify-between p-5 border border-gray-200 rounded-2xl hover:border-gray-600 hover:shadow-md transition-all group bg-white"
+                    <div className="space-y-4">
+                      <div className="flex items-center gap-4 p-5 border border-gray-200 rounded-2xl bg-white">
+                        <div className="w-12 h-12 bg-gray-50 rounded-full flex items-center justify-center">
+                          <i className="ri-mail-line text-xl"></i>
+                        </div>
+                        <div>
+                          <h3 className="font-bold text-gray-900">Sign-in email</h3>
+                          <p className="text-sm text-gray-500">{user?.email}</p>
+                        </div>
+                      </div>
+                      <div className="p-5 border border-gray-200 rounded-2xl bg-white">
+                        <h3 className="font-bold text-gray-900 mb-1">Password</h3>
+                        <p className="text-sm text-gray-500 mb-3">Change it from Profile Settings. Changing it signs you out everywhere.</p>
+                        <button
+                          type="button"
+                          onClick={() => setActiveTab('profile')}
+                          className="text-sm font-semibold text-gray-900 underline underline-offset-4"
                         >
-                          <div className="flex items-center gap-4">
-                            <div className="w-12 h-12 bg-gray-50 rounded-full flex items-center justify-center group-hover:bg-gray-100 group-hover:text-gray-900 transition-colors">
-                              <i className={`${option.icon} text-xl`}></i>
-                            </div>
-                            <div>
-                              <h3 className="font-bold text-gray-900">{option.title}</h3>
-                              <p className="text-sm text-gray-500">{option.description}</p>
-                            </div>
-                          </div>
-                          <div className="flex items-center gap-3">
-                            {option.status === 'verified' && (
-                              <span className="text-xs font-bold px-3 py-1 bg-gray-100 text-gray-900 rounded-full flex items-center gap-1">
-                                <i className="ri-verified-badge-fill"></i> Verified
-                              </span>
-                            )}
-                            {option.status === 'unverified' && (
-                              <span className="text-xs font-bold px-3 py-1 bg-amber-100 text-amber-700 rounded-full flex items-center gap-1">
-                                <i className="ri-error-warning-fill"></i> Verify
-                              </span>
-                            )}
-                            <i className="ri-arrow-right-line text-gray-300 group-hover:text-gray-600 transition-colors"></i>
-                          </div>
-                        </Link>
-                      ))}
+                          Go to Profile Settings
+                        </button>
+                      </div>
+                      <div className="p-5 border border-gray-200 rounded-2xl bg-white">
+                        <h3 className="font-bold text-gray-900 mb-1">Signed in somewhere else?</h3>
+                        <p className="text-sm text-gray-500 mb-3">Sign out of this account on every phone and computer.</p>
+                        <button
+                          type="button"
+                          onClick={handleSignOut}
+                          className="px-4 py-2 rounded-lg border-2 border-gray-300 hover:border-gray-500 text-sm font-semibold text-gray-900"
+                        >
+                          Sign out of all devices
+                        </button>
+                      </div>
                     </div>
                   </div>
                 )}

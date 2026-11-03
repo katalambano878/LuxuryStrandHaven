@@ -1,39 +1,84 @@
 /**
- * Simple HTML sanitizer to prevent XSS attacks
- * For production, consider using a library like DOMPurify
+ * Allowlist HTML sanitizer for admin-written content (blog posts, help
+ * articles). Every tag and attribute is rebuilt from scratch: anything not on
+ * the lists below is dropped, and links/images only keep safe URL schemes.
  */
 
-// Allowed HTML tags for content rendering
-const ALLOWED_TAGS = [
+const ALLOWED_TAGS = new Set([
   'p', 'br', 'strong', 'b', 'em', 'i', 'u', 's',
   'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
   'ul', 'ol', 'li',
   'a', 'span', 'div',
   'blockquote', 'pre', 'code',
   'table', 'thead', 'tbody', 'tr', 'th', 'td',
-  'img', 'hr'
-];
+  'img', 'hr', 'figure', 'figcaption',
+]);
 
-// Allowed attributes per tag
+const VOID_TAGS = new Set(['br', 'img', 'hr']);
+
 const ALLOWED_ATTRS: Record<string, string[]> = {
-  'a': ['href', 'title', 'target', 'rel'],
-  'img': ['src', 'alt', 'width', 'height', 'title'],
-  'td': ['colspan', 'rowspan'],
-  'th': ['colspan', 'rowspan'],
-  '*': ['class', 'id', 'style'] // Global attributes
+  a: ['href', 'title', 'target'],
+  img: ['src', 'alt', 'width', 'height', 'title'],
+  td: ['colspan', 'rowspan'],
+  th: ['colspan', 'rowspan'],
+  '*': ['class'],
 };
 
-// Patterns to remove (script injection attempts)
-const DANGEROUS_PATTERNS = [
-  /<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi,
-  /javascript:/gi,
-  /on\w+\s*=/gi, // onclick, onerror, etc.
-  /data:/gi,
-  /<iframe\b[^<]*(?:(?!<\/iframe>)<[^<]*)*<\/iframe>/gi,
-  /<object\b[^<]*(?:(?!<\/object>)<[^<]*)*<\/object>/gi,
-  /<embed\b[^<]*(?:(?!<\/embed>)<[^<]*)*<\/embed>/gi,
-  /<form\b[^<]*(?:(?!<\/form>)<[^<]*)*<\/form>/gi,
-];
+/** Elements removed together with everything inside them. */
+const DROP_WITH_CONTENT = /<(script|style|iframe|object|embed|form|svg|math|template|noscript|textarea|select|button)\b[\s\S]*?<\/\1\s*>/gi;
+
+function decodeEntities(value: string): string {
+  return value
+    .replace(/&#x([0-9a-f]+);?/gi, (_, h) => String.fromCharCode(parseInt(h, 16)))
+    .replace(/&#(\d+);?/g, (_, d) => String.fromCharCode(parseInt(d, 10)))
+    .replace(/&colon;/gi, ':')
+    .replace(/&tab;/gi, '\t')
+    .replace(/&newline;/gi, '\n')
+    .replace(/&quot;/gi, '"')
+    .replace(/&apos;/gi, "'")
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&amp;/gi, '&');
+}
+
+function safeUrl(raw: string, forImage: boolean): string | null {
+  // Browsers ignore control characters and whitespace inside the scheme.
+  const url = decodeEntities(raw).replace(/[\u0000-\u0020\u007f-\u009f]/g, '');
+  if (/^(https?:|mailto:|tel:)/i.test(url)) return url;
+  if (/^(\/(?!\/)|#|\.\/|\.\.\/)/.test(url)) return url;
+  if (!/^[a-z][a-z0-9+.-]*:/i.test(url) && !url.startsWith('//')) return url; // relative path
+  if (forImage && /^data:image\/(png|jpe?g|gif|webp);base64,/i.test(url)) return url;
+  return null;
+}
+
+function escapeAttr(value: string): string {
+  return value.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function rebuildTag(name: string, attrText: string, closing: boolean): string {
+  const tag = name.toLowerCase();
+  if (!ALLOWED_TAGS.has(tag)) return '';
+  if (closing) return VOID_TAGS.has(tag) ? '' : `</${tag}>`;
+
+  const allowed = new Set([...(ALLOWED_ATTRS[tag] || []), ...ALLOWED_ATTRS['*']]);
+  const out: string[] = [];
+  const attrRe = /([a-zA-Z_:][-a-zA-Z0-9_:.]*)\s*(?:=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+)))?/g;
+  let m: RegExpExecArray | null;
+  while ((m = attrRe.exec(attrText))) {
+    const attr = m[1].toLowerCase();
+    if (!allowed.has(attr)) continue;
+    let value = m[2] ?? m[3] ?? m[4] ?? '';
+    if (attr === 'href' || attr === 'src') {
+      const safe = safeUrl(value, attr === 'src');
+      if (safe === null) continue;
+      value = safe;
+    }
+    if (attr === 'target') value = value === '_blank' ? '_blank' : '_self';
+    out.push(`${attr}="${escapeAttr(decodeEntities(value))}"`);
+  }
+  if (tag === 'a' && out.some((a) => a.startsWith('target="_blank"'))) out.push('rel="noopener noreferrer"');
+  return `<${tag}${out.length ? ' ' + out.join(' ') : ''}>`;
+}
 
 /**
  * Sanitize HTML content to prevent XSS attacks
@@ -44,27 +89,21 @@ export function sanitizeHtml(html: string): string {
   if (!html || typeof html !== 'string') {
     return '';
   }
-
-  let sanitized = html;
-
-  // Remove dangerous patterns
-  for (const pattern of DANGEROUS_PATTERNS) {
-    sanitized = sanitized.replace(pattern, '');
-  }
-
-  // Remove any remaining script tags that might have been obfuscated
-  sanitized = sanitized.replace(/<script[\s\S]*?<\/script>/gi, '');
-  
-  // Remove event handlers
-  sanitized = sanitized.replace(/\s+on\w+\s*=\s*["'][^"']*["']/gi, '');
-  sanitized = sanitized.replace(/\s+on\w+\s*=\s*[^\s>]*/gi, '');
-
-  // Remove javascript: and data: URLs from href/src attributes
-  sanitized = sanitized.replace(/href\s*=\s*["']?\s*javascript:[^"'>\s]*/gi, 'href="#"');
-  sanitized = sanitized.replace(/src\s*=\s*["']?\s*javascript:[^"'>\s]*/gi, 'src=""');
-  sanitized = sanitized.replace(/href\s*=\s*["']?\s*data:[^"'>\s]*/gi, 'href="#"');
-  
-  return sanitized;
+  // Rebuilt tags are parked behind placeholders so every other "<" or ">"
+  // left in the text can be escaped and never start a tag in the browser.
+  const tags: string[] = [];
+  const parked = html
+    .replace(/\u0000/g, '')
+    .replace(/<!--[\s\S]*?-->/g, '')
+    .replace(DROP_WITH_CONTENT, '')
+    .replace(/<(\/?)([a-zA-Z][a-zA-Z0-9]*)([^<>]*)>/g, (_, slash, name, attrs) => {
+      tags.push(rebuildTag(name, attrs, slash === '/'));
+      return `\u0000${tags.length - 1}\u0000`;
+    });
+  return parked
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/\u0000(\d+)\u0000/g, (_, i) => tags[Number(i)]);
 }
 
 /**

@@ -34,6 +34,17 @@ interface OrderStats {
   status: string;
 }
 
+function csvRow(values: unknown[]): string {
+  return values
+    .map((v) => {
+      let text = String(v ?? '');
+      // Stop spreadsheet apps from running customer-typed text as a formula.
+      if (/^[=+\-@\t\r]/.test(text)) text = `'${text}`;
+      return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+    })
+    .join(',');
+}
+
 export default function AdminOrdersPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
@@ -251,8 +262,8 @@ export default function AdminOrdersPage() {
       }
     } else if (action === 'Export') {
       const ordersToExport = orders.filter(o => selectedOrders.includes(o.id));
-      const csvContent = `Order ID,Customer,Email,Date,Items,Total,Status,Payment\n${ordersToExport.map(o =>
-        `${o.order_number || o.id},${getCustomerName(o)},${getCustomerEmail(o)},${formatDate(o.created_at)},${getItemCount(o)},${o.total},${o.status},${o.payment_method || 'N/A'}`
+      const csvContent = `Order ID,Customer,Email,Date,Items,Total,Status,Payment status\n${ordersToExport.map(o =>
+        csvRow([o.order_number || o.id, getCustomerName(o), getCustomerEmail(o), formatDate(o.created_at), getItemCount(o), o.total, o.status, o.payment_status])
       ).join('\n')}`;
       const blob = new Blob([csvContent], { type: 'text/csv' });
       const url = window.URL.createObjectURL(blob);
@@ -267,8 +278,8 @@ export default function AdminOrdersPage() {
   };
 
   const handleExportAll = () => {
-    const csvContent = `Order ID,Customer,Email,Date,Items,Total,Status,Payment\n${orders.map(o =>
-      `${o.order_number || o.id},${getCustomerName(o)},${getCustomerEmail(o)},${formatDate(o.created_at)},${getItemCount(o)},${o.total},${o.status},${o.payment_method || 'N/A'}`
+    const csvContent = `Order ID,Customer,Email,Date,Items,Total,Status,Payment status\n${orders.map(o =>
+      csvRow([o.order_number || o.id, getCustomerName(o), getCustomerEmail(o), formatDate(o.created_at), getItemCount(o), o.total, o.status, o.payment_status])
     ).join('\n')}`;
     const blob = new Blob([csvContent], { type: 'text/csv' });
     const url = window.URL.createObjectURL(blob);
@@ -288,12 +299,16 @@ export default function AdminOrdersPage() {
   const handleResendPaymentLink = async (order: Order) => {
     setSendingPaymentLink(order.id);
     try {
+      const { data: { session } } = await supabase.auth.getSession();
       const response = await fetch('/api/notifications', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(session?.access_token && { Authorization: `Bearer ${session.access_token}` })
+        },
         body: JSON.stringify({
           type: 'payment_link',
-          payload: order
+          payload: { id: order.id }
         })
       });
       

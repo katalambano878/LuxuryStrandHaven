@@ -258,6 +258,23 @@ function splitTopLevel(s: string): string[] {
   return out;
 }
 
+/**
+ * Optional access guard used by the public /rest/v1 shim. Server code that
+ * calls the compat client directly runs without one (service-role semantics).
+ */
+export interface QueryGuard {
+  /** May rows of `embedTable` be embedded under `parentTable`? */
+  canEmbed(parentTable: string, embedTable: string): boolean;
+  /** May this column be used in a filter or ORDER BY? */
+  canUseColumn(table: string, column: string): boolean;
+  /** Remove columns the caller must not see. Mutates the row. */
+  redact(table: string, row: Row): void;
+  /** Hide embedded rows the caller must not see (e.g. draft products). */
+  rowVisible?(parentTable: string, table: string, row: Row): boolean;
+  /** Columns rowVisible needs, fetched even when the select omits them. */
+  visibilityColumns?(table: string): string[];
+}
+
 // ---- the chainable query builder -------------------------------------------
 class QueryBuilder implements PromiseLike<{ data: any; error: any; count: number | null }> {
   private table: string;
@@ -274,9 +291,25 @@ class QueryBuilder implements PromiseLike<{ data: any; error: any; count: number
   private onConflictCols: string[] | null = null;
   private returnRows = false;
   private singleMode: "none" | "single" | "maybe" = "none";
+  private guard: QueryGuard | null = null;
 
   constructor(table: string) {
     this.table = table;
+  }
+
+  setGuard(guard: QueryGuard | null) {
+    this.guard = guard;
+    return this;
+  }
+
+  hasFilters(): boolean {
+    return this.filters.length > 0;
+  }
+
+  private checkColumn(col: string) {
+    if (this.guard && !this.guard.canUseColumn(this.table, col)) {
+      throw new Error(`Column not allowed: ${col}`);
+    }
   }
 
   select(sel = "*", opts?: { count?: "exact" | "planned" | "estimated"; head?: boolean }) {
@@ -368,12 +401,12 @@ class QueryBuilder implements PromiseLike<{ data: any; error: any; count: number
     return this;
   }
   limit(n: number) {
-    this.limitN = n;
+    this.limitN = toNonNegativeInt(n, "limit");
     return this;
   }
   range(from: number, to: number) {
-    this.rangeFrom = from;
-    this.rangeTo = to;
+    this.rangeFrom = toNonNegativeInt(from, "range");
+    this.rangeTo = toNonNegativeInt(to, "range");
     return this;
   }
   single() {
@@ -396,6 +429,7 @@ class QueryBuilder implements PromiseLike<{ data: any; error: any; count: number
   private buildWhere(params: any[]): string {
     const clauses: string[] = [];
     for (const f of this.filters) {
+      if (f.col) this.checkColumn(f.col);
       if (f.kind === "cmp") {
         clauses.push(this.cmpClause(f.col!, f.op!, f.value, params));
       } else if (f.kind === "in") {
@@ -433,7 +467,10 @@ class QueryBuilder implements PromiseLike<{ data: any; error: any; count: number
     if (value === null || value === "null") return `${ident(col)} IS NULL`;
     if (value === true || value === "true") return `${ident(col)} IS TRUE`;
     if (value === false || value === "false") return `${ident(col)} IS FALSE`;
-    return `${ident(col)} IS NOT DISTINCT FROM ${value}`;
+    if (value === "unknown") return `${ident(col)} IS UNKNOWN`;
+    // PostgREST only accepts null/true/false/unknown for `is`. Never splice
+    // anything else into SQL.
+    throw new Error(`Unsupported value for is: ${String(value)}`);
   }
 
   private cmpClause(col: string, op: string, value: any, params: any[]): string {
@@ -479,8 +516,10 @@ class QueryBuilder implements PromiseLike<{ data: any; error: any; count: number
     }
 
     const first = seg.indexOf(".");
+    if (first <= 0) throw new Error(`Invalid or() term: ${seg}`);
     const col = seg.slice(0, first).trim();
     const rest = seg.slice(first + 1).trim();
+    this.checkColumn(col);
 
     // in.(a,b,c) list membership
     if (rest.startsWith("in.(") && rest.endsWith(")")) {
@@ -516,6 +555,7 @@ class QueryBuilder implements PromiseLike<{ data: any; error: any; count: number
     let sql = "";
     if (this.orders.length) {
       const parts = this.orders.map((o) => {
+        this.checkColumn(o.col);
         const dir = o.ascending ? "ASC" : "DESC";
         const nulls =
           o.nullsFirst === undefined
@@ -564,7 +604,8 @@ class QueryBuilder implements PromiseLike<{ data: any; error: any; count: number
             params
           );
           rows = res.rows;
-          await this.resolveEmbeds(rows, parsed);
+          await this.resolveEmbeds(rows, parsed, this.table);
+          if (this.guard) for (const r of rows) this.guard.redact(this.table, r);
         }
       } else if (this.action === "insert" || this.action === "upsert") {
         rows = await this.execInsert(pool);
@@ -632,23 +673,27 @@ class QueryBuilder implements PromiseLike<{ data: any; error: any; count: number
     return Array.from(cols).join(", ");
   }
 
-  private async resolveEmbeds(rows: Row[], parsed: ParsedSelect): Promise<void> {
+  private async resolveEmbeds(rows: Row[], parsed: ParsedSelect, table: string): Promise<void> {
     if (rows.length === 0 || parsed.embeds.length === 0) return;
     const pool = getPool();
     for (const embed of parsed.embeds) {
       // If no explicit FK column, decide direction from the FK map: an edge
-      // from THIS table to the embed table means forward (object); otherwise
-      // it's a reverse has-many (array).
+      // from the owning table to the embed table means forward (object);
+      // otherwise it's a reverse has-many (array).
       let fk = embed.fkColumn;
       let embedTable = embed.table;
       if (fk) {
         // fk-column form: prefer the owning table's own FK edge to disambiguate
         // (template_id -> sms_templates vs email_templates depends on the table)
-        const own = (FK_MAP[this.table] || []).find((e) => e.column === fk);
+        const own = (FK_MAP[table] || []).find((e) => e.column === fk);
         if (own) embedTable = own.foreignTable;
       } else {
-        const fwd = (FK_MAP[this.table] || []).find((e) => e.foreignTable === embed.table);
+        const fwd = (FK_MAP[table] || []).find((e) => e.foreignTable === embed.table);
         if (fwd) fk = fwd.column;
+      }
+      if (!PG_IDENT.test(embedTable)) throw new Error(`Unsafe table name: ${embedTable}`);
+      if (this.guard && !this.guard.canEmbed(table, embedTable)) {
+        throw new Error(`Not allowed to embed ${embedTable}`);
       }
       if (fk) {
         // forward embed: current.fk -> related.id  (object)
@@ -656,7 +701,7 @@ class QueryBuilder implements PromiseLike<{ data: any; error: any; count: number
           new Set(rows.map((r) => r[fk]).filter((v) => v !== null && v !== undefined))
         );
         const wantId = embedWantsId(embed.select);
-        const innerCols = this.embedColumns(embed.select);
+        const innerCols = this.embedColumns(embed.select, embedTable);
         let related: Row[] = [];
         if (ids.length) {
           const ph = ids.map((_, i) => `$${i + 1}`).join(",");
@@ -666,9 +711,11 @@ class QueryBuilder implements PromiseLike<{ data: any; error: any; count: number
           );
           related = res.rows;
         }
+        related = this.applyVisibility(table, embedTable, embed.select, related);
         const byId = new Map(related.map((r) => [r.id, r]));
         // resolve nested embeds
-        await this.resolveEmbeds(related, embed.select);
+        await this.resolveEmbeds(related, embed.select, embedTable);
+        if (this.guard) for (const r of related) this.guard.redact(embedTable, r);
         // PostgREST only returns requested columns — drop the join-only id
         if (!wantId) for (const r of related) delete r.id;
         for (const r of rows) {
@@ -676,12 +723,12 @@ class QueryBuilder implements PromiseLike<{ data: any; error: any; count: number
         }
       } else {
         // reverse embed (has-many): related.<table>_fk -> current.id (array)
-        const edge = this.findReverseEdge(embedTable);
-        const fkCol = edge?.column ?? `${singularize(this.table)}_id`;
+        const edge = this.findReverseEdge(embedTable, table);
+        const fkCol = edge?.column ?? `${singularize(table)}_id`;
         const parentIds = Array.from(new Set(rows.map((r) => r.id).filter(Boolean)));
         const wantId = embedWantsId(embed.select);
         const wantFk = embed.select.star || embed.select.columns.includes(fkCol);
-        const innerCols = this.embedColumns(embed.select, fkCol);
+        const innerCols = this.embedColumns(embed.select, embedTable, fkCol);
         let related: Row[] = [];
         if (parentIds.length) {
           const ph = parentIds.map((_, i) => `$${i + 1}`).join(",");
@@ -705,7 +752,9 @@ class QueryBuilder implements PromiseLike<{ data: any; error: any; count: number
           );
           related = res.rows;
         }
-        await this.resolveEmbeds(related, embed.select);
+        related = this.applyVisibility(table, embedTable, embed.select, related);
+        await this.resolveEmbeds(related, embed.select, embedTable);
+        if (this.guard) for (const r of related) this.guard.redact(embedTable, r);
         const grouped = new Map<any, Row[]>();
         for (const r of related) {
           const k = r[fkCol];
@@ -719,20 +768,38 @@ class QueryBuilder implements PromiseLike<{ data: any; error: any; count: number
     }
   }
 
-  private embedColumns(parsed: ParsedSelect, extraFk?: string): string {
+  private applyVisibility(parentTable: string, table: string, parsed: ParsedSelect, rows: Row[]): Row[] {
+    if (!this.guard?.rowVisible) return rows;
+    const visible = rows.filter((r) => this.guard!.rowVisible!(parentTable, table, r));
+    if (!parsed.star) {
+      for (const c of this.guard.visibilityColumns?.(table) || []) {
+        if (!parsed.columns.includes(c)) for (const r of visible) delete r[c];
+      }
+    }
+    return visible;
+  }
+
+  private embedColumns(parsed: ParsedSelect, table: string, extraFk?: string): string {
     if (parsed.star && parsed.columns.length === 0) return "*";
     const cols = new Set<string>();
+    for (const c of this.guard?.visibilityColumns?.(table) || []) cols.add(ident(c));
     if (parsed.star) cols.add("*");
     for (const c of parsed.columns) cols.add(ident(c));
     cols.add(ident("id"));
     if (extraFk) cols.add(ident(extraFk));
-    for (const e of parsed.embeds) if (e.fkColumn) cols.add(ident(e.fkColumn));
+    for (const e of parsed.embeds) {
+      // nested forward embeds need this table's FK column, explicit or implied
+      const fk =
+        e.fkColumn ?? (FK_MAP[table] || []).find((x) => x.foreignTable === e.table)?.column;
+      if (fk) cols.add(ident(fk));
+    }
     return Array.from(cols).join(", ");
   }
 
-  private findReverseEdge(relatedTable: string): FkEdge | undefined {
-    return (FK_MAP[relatedTable] || []).find((e) => e.foreignTable === this.table);
+  private findReverseEdge(relatedTable: string, table: string): FkEdge | undefined {
+    return (FK_MAP[relatedTable] || []).find((e) => e.foreignTable === table);
   }
+
 
   private async execInsert(pool: ReturnType<typeof getPool>): Promise<Row[]> {
     const rowsIn = Array.isArray(this.payload) ? this.payload : [this.payload!];
@@ -801,6 +868,12 @@ class QueryBuilder implements PromiseLike<{ data: any; error: any; count: number
   ): PromiseLike<TResult1 | TResult2> {
     return this.exec().then(onfulfilled, onrejected);
   }
+}
+
+function toNonNegativeInt(n: unknown, what: string): number {
+  const v = Number(n);
+  if (!Number.isInteger(v) || v < 0) throw new Error(`Invalid ${what}: ${String(n)}`);
+  return v;
 }
 
 function embedWantsId(parsed: ParsedSelect): boolean {

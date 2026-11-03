@@ -13,7 +13,7 @@ const siteDescription = 'Shop 100% human hair wigs, bundles, closures & frontals
 // JSON-LD image. The ?v= query is a cache-buster so Facebook/Twitter/WhatsApp
 // re-scrape the page instead of serving their cached older preview images.
 // Bump the number whenever the logo changes.
-export const SOCIAL_IMAGE = '/logo.png?v=4';
+const SOCIAL_IMAGE = '/logo.png?v=4';
 const SOCIAL_IMAGE_ABS = `${siteUrl}/logo.png?v=4`;
 
 export const metadata: Metadata = {
@@ -78,7 +78,7 @@ export const metadata: Metadata = {
       { rel: 'mask-icon', url: SOCIAL_IMAGE, color: '#000000' },
     ],
   },
-  manifest: '/manifest.json',
+  manifest: '/manifest.webmanifest',
   verification: {
     google: process.env.NEXT_PUBLIC_GOOGLE_SITE_VERIFICATION || '',
   },

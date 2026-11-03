@@ -94,22 +94,25 @@ export function checkRateLimit(
  * @returns Client identifier string
  */
 export function getClientIdentifier(request: Request): string {
-  // Try various headers for the real IP
-  const forwardedFor = request.headers.get('x-forwarded-for');
-  if (forwardedFor) {
-    return forwardedFor.split(',')[0].trim();
-  }
-  
+  // The reverse proxy (Traefik) sets X-Real-IP from the connection itself, so
+  // prefer it. The left-most X-Forwarded-For entry is whatever the client sent,
+  // so fall back to the right-most one, which our proxy appended.
   const realIp = request.headers.get('x-real-ip');
   if (realIp) {
-    return realIp;
+    return realIp.trim();
   }
-  
+
+  const forwardedFor = request.headers.get('x-forwarded-for');
+  if (forwardedFor) {
+    const parts = forwardedFor.split(',').map((p) => p.trim()).filter(Boolean);
+    if (parts.length) return parts[parts.length - 1];
+  }
+
   const cfConnectingIp = request.headers.get('cf-connecting-ip');
   if (cfConnectingIp) {
     return cfConnectingIp;
   }
-  
+
   // Fallback to a default identifier
   return 'unknown';
 }
@@ -136,6 +139,18 @@ export const RATE_LIMITS = {
     windowSeconds: 60 // 50 requests per minute
   },
   
+  // Sign-in / sign-up attempts per IP
+  auth: {
+    maxRequests: 10,
+    windowSeconds: 60
+  },
+
+  // Password reset emails per IP
+  passwordReset: {
+    maxRequests: 5,
+    windowSeconds: 15 * 60
+  },
+
   // General API - default limits
   default: {
     maxRequests: 100,

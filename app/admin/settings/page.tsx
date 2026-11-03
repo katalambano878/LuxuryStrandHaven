@@ -55,6 +55,16 @@ const inputClass = "w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:r
 const textareaClass = `${inputClass} resize-none`;
 
 // ── Main Component ─────────────────────────────────────────────────
+// Secrets belong in server environment variables, never in store_settings.
+const SECRET_SETTING_KEYS = new Set([
+    'integration_resend_api_key',
+    'integration_moolre_api_user',
+    'integration_moolre_api_pubkey',
+    'integration_moolre_account_number',
+    'integration_moolre_sms_api_key',
+    'integration_recaptcha_secret_key',
+]);
+
 export default function SettingsPage() {
     const [activeTab, setActiveTab] = useState<TabId>('general');
     const [settings, setSettings] = useState<Record<string, string>>({});
@@ -62,6 +72,10 @@ export default function SettingsPage() {
     const [saving, setSaving] = useState(false);
     const [saved, setSaved] = useState(false);
     const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+    // Only keys edited on this page are saved, so values changed elsewhere
+    // (e.g. the maintenance switch in the header) are never overwritten.
+    const dirtyKeys = useRef<Set<string>>(new Set());
+    const loadedHeroSlides = useRef<string>('');
 
     // Hero slideshow state
     const [heroSlides, setHeroSlides] = useState<string[]>(DEFAULT_HERO_SLIDES);
@@ -84,6 +98,8 @@ export default function SettingsPage() {
                 }
             });
             setSettings(map);
+            dirtyKeys.current.clear();
+            loadedHeroSlides.current = heroSlidesRaw || JSON.stringify(DEFAULT_HERO_SLIDES);
 
             // Parse hero slides from dedicated variable (kept out of settings map)
             if (heroSlidesRaw) {
@@ -108,6 +124,7 @@ export default function SettingsPage() {
 
     // Update in-memory state
     const set = (key: string, value: string) => {
+        dirtyKeys.current.add(key);
         setSettings(prev => ({ ...prev, [key]: value }));
         setSaved(false);
     };
@@ -116,23 +133,26 @@ export default function SettingsPage() {
     const handleSave = async () => {
         setSaving(true);
         try {
-            const entries = Object.entries(settings).filter(([_, v]) => v !== undefined);
-            for (const [key, value] of entries) {
-                await supabase.from('store_settings').upsert(
-                    { key, value, updated_at: new Date().toISOString() },
-                    { onConflict: 'key' }
-                );
-            }
+            const now = new Date().toISOString();
+            const rows = Array.from(dirtyKeys.current)
+                .filter((key) => settings[key] !== undefined && key !== 'hero_slides' && !SECRET_SETTING_KEYS.has(key))
+                .map((key) => ({ key, value: settings[key], updated_at: now }));
             // Save hero slides from dedicated state (not the stale settings map copy)
-            await supabase.from('store_settings').upsert(
-                { key: 'hero_slides', value: JSON.stringify(heroSlides), updated_at: new Date().toISOString() },
-                { onConflict: 'key' }
-            );
+            const slidesJson = JSON.stringify(heroSlides);
+            if (slidesJson !== loadedHeroSlides.current) {
+                rows.push({ key: 'hero_slides', value: slidesJson, updated_at: now });
+            }
+            if (rows.length > 0) {
+                const { error } = await supabase.from('store_settings').upsert(rows, { onConflict: 'key' });
+                if (error) throw error;
+            }
+            dirtyKeys.current.clear();
+            loadedHeroSlides.current = slidesJson;
             setSaved(true);
             setTimeout(() => setSaved(false), 3000);
         } catch (err) {
             console.error('Failed to save settings:', err);
-            alert('Failed to save settings. Please try again.');
+            alert('Failed to save settings: ' + (err instanceof Error ? err.message : (err as any)?.message || 'please try again.'));
         } finally {
             setSaving(false);
         }
@@ -375,7 +395,7 @@ export default function SettingsPage() {
                 return (
                     <div className="space-y-6">
                         {/* Hidden file input for slide uploads */}
-                        <input ref={slideFileRef} type="file" accept="image/*" className="hidden" onChange={handleSlideUpload} />
+                        <input ref={slideFileRef} type="file" accept="image/jpeg,image/png,image/webp,image/gif,image/avif" className="hidden" onChange={handleSlideUpload} />
 
                         <SectionCard title="Hero Slideshow" icon="ri-slideshow-3-line" description="Background images that rotate in the hero section">
                             <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
@@ -625,35 +645,14 @@ export default function SettingsPage() {
                             <i className="ri-lock-line text-amber-600 text-xl mt-0.5"></i>
                             <div>
                                 <p className="text-sm font-semibold text-amber-800">Security Notice</p>
-                                <p className="text-xs text-amber-700 mt-0.5">API keys stored here are accessible only by admin users via RLS policies. They are used server-side in API routes and are never exposed to the browser.</p>
+                                <p className="text-xs text-amber-700 mt-0.5">API keys (Resend, Moolre, SMS, reCAPTCHA) are set as environment variables on the server, never here. Keys saved in this page used to be readable by anyone, so rotate any key that was ever entered here.</p>
                             </div>
                         </div>
 
                         <SectionCard title="Email (Resend)" icon="ri-mail-line" description="Configure email delivery via Resend">
-                            <FieldGroup label="Resend API Key" description="Get your key from resend.com/api-keys"><input type="password" value={val('integration_resend_api_key')} onChange={e => set('integration_resend_api_key', e.target.value)} className={inputClass} placeholder="re_..." /></FieldGroup>
                             <div className="grid md:grid-cols-2 gap-5">
                                 <FieldGroup label="Admin Email" description="Email for receiving order notifications"><input type="email" value={val('integration_admin_email')} onChange={e => set('integration_admin_email', e.target.value)} className={inputClass} /></FieldGroup>
                                 <FieldGroup label="From Address" description="Sender name and email"><input type="text" value={val('integration_email_from')} onChange={e => set('integration_email_from', e.target.value)} className={inputClass} placeholder="Store Name <noreply@domain.com>" /></FieldGroup>
-                            </div>
-                        </SectionCard>
-
-                        <SectionCard title="Payment (Moolre)" icon="ri-bank-card-line" description="Configure Moolre payment gateway">
-                            <div className="grid md:grid-cols-2 gap-5">
-                                <FieldGroup label="API User"><input type="text" value={val('integration_moolre_api_user')} onChange={e => set('integration_moolre_api_user', e.target.value)} className={inputClass} /></FieldGroup>
-                                <FieldGroup label="API Public Key"><input type="password" value={val('integration_moolre_api_pubkey')} onChange={e => set('integration_moolre_api_pubkey', e.target.value)} className={inputClass} /></FieldGroup>
-                                <FieldGroup label="Account Number"><input type="text" value={val('integration_moolre_account_number')} onChange={e => set('integration_moolre_account_number', e.target.value)} className={inputClass} /></FieldGroup>
-                                <FieldGroup label="Merchant Email"><input type="email" value={val('integration_moolre_merchant_email')} onChange={e => set('integration_moolre_merchant_email', e.target.value)} className={inputClass} /></FieldGroup>
-                            </div>
-                        </SectionCard>
-
-                        <SectionCard title="SMS (Moolre VAS)" icon="ri-message-2-line" description="Configure SMS notifications via Moolre SMS API">
-                            <FieldGroup label="SMS API Key (VASKEY)"><input type="password" value={val('integration_moolre_sms_api_key')} onChange={e => set('integration_moolre_sms_api_key', e.target.value)} className={inputClass} /></FieldGroup>
-                        </SectionCard>
-
-                        <SectionCard title="reCAPTCHA" icon="ri-robot-line" description="Google reCAPTCHA spam protection">
-                            <div className="grid md:grid-cols-2 gap-5">
-                                <FieldGroup label="Site Key"><input type="text" value={val('integration_recaptcha_site_key')} onChange={e => set('integration_recaptcha_site_key', e.target.value)} className={inputClass} /></FieldGroup>
-                                <FieldGroup label="Secret Key"><input type="password" value={val('integration_recaptcha_secret_key')} onChange={e => set('integration_recaptcha_secret_key', e.target.value)} className={inputClass} /></FieldGroup>
                             </div>
                         </SectionCard>
 

@@ -11,7 +11,6 @@ import { CMSProvider } from '@/context/CMSContext';
 
 // Lazy-load non-critical components
 import dynamic from 'next/dynamic';
-const SessionTimeoutWarning = dynamic(() => import('@/components/SessionTimeoutWarning'), { ssr: false });
 const PWAPrompt = dynamic(() => import('@/components/PWAPrompt'), { ssr: false });
 const PWAInstaller = dynamic(() => import('@/components/PWAInstaller'), { ssr: false });
 const OfflineIndicator = dynamic(() => import('@/components/OfflineIndicator'), { ssr: false });
@@ -38,7 +37,6 @@ export default function StoreLayout({
         </ErrorBoundary>
         <Footer />
         <MobileBottomNav />
-        <SessionTimeoutWarning />
         <PWAPrompt />
         <OfflineIndicator />
         <NetworkStatusMonitor />

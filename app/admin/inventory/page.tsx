@@ -4,11 +4,20 @@ import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabase';
 
+function csvRow(values: unknown[]): string {
+  return values
+    .map((v) => {
+      let text = String(v ?? '');
+      // Stop spreadsheet apps from running customer-typed text as a formula.
+      if (/^[=+\-@\t\r]/.test(text)) text = `'${text}`;
+      return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+    })
+    .join(',');
+}
+
 export default function InventoryManagementPage() {
   const [searchTerm, setSearchTerm] = useState('');
   const [stockFilter, setStockFilter] = useState('all');
-  const [showImportModal, setShowImportModal] = useState(false);
-  const [showExportModal, setShowExportModal] = useState(false);
   const [selectedProducts, setSelectedProducts] = useState<string[]>([]);
   const [products, setProducts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -28,6 +37,7 @@ export default function InventoryManagementPage() {
           sku,
           price,
           quantity,
+          slug,
           categories!category_id(name)
         `)
         .order('name');
@@ -41,20 +51,17 @@ export default function InventoryManagementPage() {
           if (stock === 0) status = 'out';
           else if (stock < 10) status = 'low';
 
-          // categories is an array from the join
-          const categoryData = p.categories as { name: string }[] | null;
+          // The category embed is a single object (forward relation), not an array
+          const categoryData = (Array.isArray(p.categories) ? p.categories[0] : p.categories) as { name: string } | null;
           return {
             id: p.id,
             name: p.name,
             sku: p.sku || 'N/A',
-            category: categoryData?.[0]?.name || 'Uncategorized',
+            category: categoryData?.name || 'Uncategorized',
+            slug: p.slug,
             currentStock: stock,
-            reorderLevel: 10, // Default
-            reorderQuantity: 50, // Default
             price: p.price || 0,
-            cost: 0, // Not in DB
             status,
-            supplier: 'Standard Supplier' // Default
           };
         });
         setProducts(mapped);
@@ -94,10 +101,27 @@ export default function InventoryManagementPage() {
     }
   };
 
-  const handleBulkRestock = () => {
-    // Placeholder for bulk restock logic
-    alert("Bulk restock feature coming soon (requires backend logic).");
+  const handleBulkRestock = async () => {
+    const answer = prompt(`Add how many units to each of the ${selectedProducts.length} selected products?`, '10');
+    if (answer === null) return;
+    const amount = parseInt(answer, 10);
+    if (!Number.isInteger(amount) || amount <= 0) {
+      alert('Enter a whole number greater than zero.');
+      return;
+    }
+    const failed: string[] = [];
+    for (const id of selectedProducts) {
+      const product = products.find((p) => p.id === id);
+      if (!product) continue;
+      const { error } = await supabase
+        .from('products')
+        .update({ quantity: (Number(product.currentStock) || 0) + amount })
+        .eq('id', id);
+      if (error) failed.push(product.name);
+    }
+    if (failed.length) alert(`Could not restock: ${failed.join(', ')}`);
     setSelectedProducts([]);
+    fetchInventory();
   };
 
   const handleExportCSV = () => {
@@ -113,14 +137,13 @@ export default function InventoryManagementPage() {
       ])
     ];
 
-    const csvContent = csvData.map(row => row.join(',')).join('\n');
+    const csvContent = csvData.map(row => csvRow(row)).join('\n');
     const blob = new Blob([csvContent], { type: 'text/csv' });
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
     a.download = `inventory-export-${new Date().toISOString().split('T')[0]}.csv`;
     a.click();
-    setShowExportModal(false);
   };
 
   return (
@@ -224,15 +247,7 @@ export default function InventoryManagementPage() {
               </div>
 
               <button
-                onClick={() => setShowImportModal(true)}
-                className="bg-gray-900 hover:bg-gray-800 text-white px-4 py-3 rounded-lg font-semibold transition-colors flex items-center space-x-2 whitespace-nowrap cursor-pointer"
-              >
-                <i className="ri-upload-line"></i>
-                <span>Import CSV</span>
-              </button>
-
-              <button
-                onClick={() => setShowExportModal(true)}
+                onClick={handleExportCSV}
                 className="border-2 border-gray-300 hover:border-gray-400 text-gray-700 px-4 py-3 rounded-lg font-semibold transition-colors flex items-center space-x-2 whitespace-nowrap cursor-pointer"
               >
                 <i className="ri-download-line"></i>
@@ -305,7 +320,6 @@ export default function InventoryManagementPage() {
                       <td className="px-6 py-4">
                         <div>
                           <p className="font-semibold text-gray-900">{product.name}</p>
-                          <p className="text-sm text-gray-500">{product.supplier}</p>
                         </div>
                       </td>
                       <td className="px-6 py-4 text-gray-700">{product.sku}</td>
@@ -340,18 +354,26 @@ export default function InventoryManagementPage() {
                       </td>
                       <td className="px-6 py-4">
                         <div className="flex items-center space-x-2">
-                          <button
-                            className="w-8 h-8 flex items-center justify-center text-gray-600 hover:text-gray-900 transition-colors cursor-pointer"
+                          <Link
+                            href={`/admin/products/${product.id}`}
+                            className="w-8 h-8 flex items-center justify-center text-gray-600 hover:text-gray-900 transition-colors"
                             title="Edit"
+                            aria-label={`Edit ${product.name}`}
                           >
                             <i className="ri-edit-line text-lg"></i>
-                          </button>
-                          <button
-                            className="w-8 h-8 flex items-center justify-center text-gray-600 hover:text-blue-700 transition-colors cursor-pointer"
-                            title="View Details"
-                          >
-                            <i className="ri-eye-line text-lg"></i>
-                          </button>
+                          </Link>
+                          {product.slug && (
+                            <a
+                              href={`/product/${product.slug}`}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="w-8 h-8 flex items-center justify-center text-gray-600 hover:text-blue-700 transition-colors"
+                              title="View in shop"
+                              aria-label={`View ${product.name} in the shop`}
+                            >
+                              <i className="ri-eye-line text-lg"></i>
+                            </a>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -362,8 +384,6 @@ export default function InventoryManagementPage() {
           </div>
         </div>
       </div>
-      {showImportModal && <div className="hidden">Mock Modal</div>}
-      {showExportModal && <div className="hidden">Mock Export</div>}
     </div>
   );
 }

@@ -167,6 +167,16 @@ export default function AdminCategoriesPage() {
       : 'Are you sure you want to delete this category? This action cannot be undone.';
     if (!confirm(message)) return;
     try {
+      // Products still point at this category; deleting it would fail half-way.
+      const { count: productCount, error: countError } = await supabase
+        .from('products')
+        .select('id', { count: 'exact', head: true })
+        .eq('category_id', categoryId);
+      if (countError) throw countError;
+      if (productCount && productCount > 0) {
+        alert(`${productCount} product(s) are in this category. Move them to another category first, then delete it.`);
+        return;
+      }
       if (childCount > 0) {
         const { error: unlinkError } = await supabase
           .from('categories')
@@ -174,6 +184,8 @@ export default function AdminCategoriesPage() {
           .eq('parent_id', categoryId);
         if (unlinkError) throw unlinkError;
       }
+      const { error: linkError } = await supabase.from('product_category_links').delete().eq('category_id', categoryId);
+      if (linkError) throw linkError;
       const { error } = await supabase.from('categories').delete().eq('id', categoryId);
       if (error) throw error;
       setCategories(prev => prev.filter(c => c.id !== categoryId));
@@ -215,7 +227,8 @@ export default function AdminCategoriesPage() {
         image_url: formData.image_url,
         parent_id: formData.parent_id || null,
         status: formData.status,
-        metadata: { featured: formData.featured }
+        // Keep any other metadata the category already has.
+        metadata: { ...((showEditModal && editingCategory?.metadata) || {}), featured: formData.featured }
       };
 
       if (showEditModal && editingCategory) {
@@ -485,7 +498,7 @@ export default function AdminCategoriesPage() {
                       <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity rounded-lg">
                         <label className="cursor-pointer bg-white px-4 py-2 rounded-lg font-semibold text-sm hover:bg-gray-100">
                           Change Image
-                          <input type="file" accept="image/*" className="hidden" onChange={handleImageUpload} />
+                          <input type="file" accept="image/jpeg,image/png,image/webp,image/gif,image/avif" className="hidden" onChange={handleImageUpload} />
                         </label>
                       </div>
                     </div>
@@ -494,7 +507,7 @@ export default function AdminCategoriesPage() {
                       <i className="ri-upload-cloud-line text-4xl text-gray-400 mb-2 w-10 h-10 flex items-center justify-center mx-auto"></i>
                       <p className="text-gray-700 font-medium">Click to upload image</p>
                       <p className="text-sm text-gray-500 mt-1">Square (1:1) Recommended (e.g., 800x800px)</p>
-                      <input type="file" accept="image/*" className="hidden" onChange={handleImageUpload} />
+                      <input type="file" accept="image/jpeg,image/png,image/webp,image/gif,image/avif" className="hidden" onChange={handleImageUpload} />
                     </label>
                   )}
                 </div>

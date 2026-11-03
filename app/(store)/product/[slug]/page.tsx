@@ -13,11 +13,15 @@ async function getProduct(slug: string) {
     );
     const { data } = await supabase
       .from('products')
-      .select('name, description, images, price, category_id, metadata')
+      .select('name, description, price, category_id, metadata, product_images(url, position)')
       .eq('slug', slug)
       .eq('status', 'active')
       .single();
-    return data;
+    if (!data) return null;
+    const images = [...((data as any).product_images || [])].sort(
+      (a: any, b: any) => (a.position ?? 0) - (b.position ?? 0)
+    );
+    return { ...data, images };
   } catch {
     return null;
   }
@@ -29,7 +33,7 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
 
   if (!product) {
     return {
-      title: 'Product Not Found | Luxury Strand Haven',
+      title: 'Product Not Found',
       robots: { index: false, follow: false },
     };
   }
