@@ -178,11 +178,6 @@ export default function AdminLayout({
       path: '/admin/pos'
     },
     {
-      title: 'Buy SMS',
-      icon: 'ri-bank-card-line',
-      path: '/admin/sms-credit'
-    },
-    {
       title: 'Products',
       icon: 'ri-box-3-line',
       path: '/admin/products'
