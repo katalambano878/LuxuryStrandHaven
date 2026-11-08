@@ -134,7 +134,10 @@ export default function Footer() {
         </div>
 
         <div className="pt-8 border-t border-gray-800 flex flex-col md:flex-row items-center justify-between gap-4 text-xs text-gray-500">
-          <p>© {new Date().getFullYear()} {siteName}. All rights reserved.</p>
+          <p>
+            © {new Date().getFullYear()} {siteName}. All rights reserved. · Powered by{' '}
+            <a href="https://doctorbarns.com" target="_blank" rel="noopener" className="hover:text-white hover:underline transition-colors">Doctor Barns Tech</a>
+          </p>
           <div className="flex flex-wrap gap-6">
             <Link href="/refund-policy" className="hover:text-white transition-colors">Refund Policy</Link>
             <Link href="/privacy" className="hover:text-white transition-colors">Privacy Policy</Link>
